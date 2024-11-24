@@ -2,8 +2,8 @@
 
 // Cấu hình MQTT Broker
 const char* mqtt_server = "c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud";
-const char* mqtt_username = "hivemq.webclient.1732431972503";
-const char* mqtt_password = "mP<195YJ2VxlDG&s,w$r";
+const char* mqtt_username = "dattran";
+const char* mqtt_password = "Dattran2";
 const int mqtt_port = 8883;
 
 // MQTT client và WiFi client

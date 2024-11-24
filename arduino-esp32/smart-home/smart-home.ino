@@ -9,7 +9,7 @@
 #include <NTPClient.h>
 
 #include "MQTTHandler.h"
-const char* sensor1_topic = "132002abc/MQ135/FireAlarm";
+const char* sensor1_topic = "MQ135/FireAlarm";
 
 /*constants*/
 #define PIN_MQ135 32
@@ -25,11 +25,6 @@ MQ135 mq135_sensor(PIN_MQ135);
 const char *ssid     = "La Thuy";
 const char *password = "hoilamchi";
 const long utcOffsetInSeconds = 7 * 3600; //Hanoi timezone (GMT+7)
-
-//Thông tin MQTT
-const char* mqttServer = "broker.hivemq.com";
-const int mqttPort = 1883;
-const char* mqttTopic = "/132002abc/MQ135/FireAlarm"; // Topic MQTT
 
 
 // Initiate UDP -> init timeClient
@@ -66,7 +61,7 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
    // Bắt đầu cập nhật thời gian từ NTP
     timeClient.begin();
-    printCurrentDateTime();
+    Serial.println(getCurrentDateTime());
   }
 
   initMQTT(ssid, password); // Khởi tạo MQTT  
@@ -75,12 +70,17 @@ void setup() {
 void loop() {
  
     handleMQTT(); // Xử lý MQTT
-    publishMessage(sensor1_topic, "ESP32 Hello", true); // Gửi tin nhắn
-    delay(3000);
+   // Tạo chuỗi JSON
+  String currentTime = getCurrentDateTime(); // Hàm bạn đã viết
+  String status = "inactive";
+  String jsonPayload = "{ \"time\": \"" + currentTime + "\", \"status\": \"" + status + "\" }";
+
+   publishMessage(sensor1_topic, jsonPayload, true);
+
+  delay(10000); // Publish mỗi 10 giây
 }
 
-
-void printCurrentDateTime(){
+String getCurrentDateTime(){
     timeClient.update();
     unsigned long epochTime = timeClient.getEpochTime();
   
@@ -95,5 +95,5 @@ void printCurrentDateTime(){
            now.hour(), now.minute(), now.second());
 
   Serial.println("Thời gian hiện tại:");
-  Serial.println(formattedDateTime);
+  return formattedDateTime;
 }
