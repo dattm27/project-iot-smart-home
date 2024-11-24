@@ -1,3 +1,4 @@
+
 #include <MQ135.h>
 #include <DHT.h>
 
@@ -6,20 +7,30 @@
 
 #include <RTClib.h>
 #include <NTPClient.h>
+
+#include "MQTTHandler.h"
+const char* sensor1_topic = "132002abc/MQ135/FireAlarm";
+
+/*constants*/
 #define PIN_MQ135 32
 #define DHT_PIN 15
 #define DHTTYPE DHT22
 DHT dht(DHT_PIN, DHTTYPE);
 MQ135 mq135_sensor(PIN_MQ135);
 
-const char *ssid     = "THANG_2G";
-const char *password = "0967240219";
 
-const char* serverIP = "172.20.10.11";      // Server IP address
-const uint16_t serverPort = 8000;           // Server port number
 
-// Set Hanoi timezone (GMT+7)
-const long utcOffsetInSeconds = 7 * 3600;
+
+
+const char *ssid     = "La Thuy";
+const char *password = "hoilamchi";
+const long utcOffsetInSeconds = 7 * 3600; //Hanoi timezone (GMT+7)
+
+//Thông tin MQTT
+const char* mqttServer = "broker.hivemq.com";
+const int mqttPort = 1883;
+const char* mqttTopic = "/132002abc/MQ135/FireAlarm"; // Topic MQTT
+
 
 // Initiate UDP -> init timeClient
 WiFiUDP ntpUDP;
@@ -57,11 +68,17 @@ void setup() {
     timeClient.begin();
     printCurrentDateTime();
   }
+
+  initMQTT(ssid, password); // Khởi tạo MQTT  
+  
 }
 void loop() {
-  // put your main code here, to run repeatedly:
-
+ 
+    handleMQTT(); // Xử lý MQTT
+    publishMessage(sensor1_topic, "ESP32 Hello", true); // Gửi tin nhắn
+    delay(3000);
 }
+
 
 void printCurrentDateTime(){
     timeClient.update();
@@ -79,5 +96,4 @@ void printCurrentDateTime(){
 
   Serial.println("Thời gian hiện tại:");
   Serial.println(formattedDateTime);
-  
 }
