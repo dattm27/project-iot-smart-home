@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
+#include <RTClib.h>
 #include <NTPClient.h>
 #define PIN_MQ135 32
 #define DHT_PIN 15
@@ -11,7 +12,7 @@
 DHT dht(DHT_PIN, DHTTYPE);
 MQ135 mq135_sensor(PIN_MQ135);
 
-const char *ssid     = "THANG_5G";
+const char *ssid     = "THANG_2G";
 const char *password = "0967240219";
 
 const char* serverIP = "172.20.10.11";      // Server IP address
@@ -29,29 +30,54 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 void setup() {
   Serial.begin(115200);
 
-  // Kết nối WiFi
+  Serial.println("Connecting to WiFi...");
+
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
+
+  // Thời gian chờ tối đa: 30 giây
+  unsigned long startAttemptTime = millis();
+  const unsigned long wifiTimeout = 30000; // 30 giây
+
+  // Chờ kết nối WiFi
+  while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime) < wifiTimeout) {
     delay(1000);
-    Serial.println("Connecting to WiFi...");
+    Serial.print(".");
   }
 
-  Serial.println("Connected to WiFi");
+  // Kiểm tra kết quả kết nối
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected to WiFi");
+  } else {
+    Serial.println("\nConnect failed");
+  }
 
-  // Cập nhật thời gian từ NTP
-  timeClient.begin();
-  timeClient.update();
-  unsigned long epochTime = timeClient.getEpochTime();
-
-  // Chuyển đổi epoch sang ngày giờ
-  unsigned long currentSecond = epochTime % 60;
-  unsigned long currentMinute = (epochTime / 60) % 60;
-  unsigned long currentHour = (epochTime / 3600 + 7) % 24; // GMT+7
-  unsigned int currentDay = (epochTime / 86400) % 30 + 1;  // Đơn giản hóa, chưa xử lý số ngày/tháng chính xác
-
-  Serial.printf("Time: %02lu:%02lu:%02lu\n", currentHour, currentMinute, currentSecond);
+  // Nếu đã kết nối WiFi, bắt đầu cập nhật thời gian
+  if (WiFi.status() == WL_CONNECTED) {
+   // Bắt đầu cập nhật thời gian từ NTP
+    timeClient.begin();
+    printCurrentDateTime();
+  }
 }
 void loop() {
   // put your main code here, to run repeatedly:
 
+}
+
+void printCurrentDateTime(){
+    timeClient.update();
+    unsigned long epochTime = timeClient.getEpochTime();
+  
+    // Chuyển đổi thành DateTime
+    DateTime now(epochTime);
+ 
+    // In thời gian theo định dạng YYYY-MM-DD HH:MM:SS
+  char formattedDateTime[20]; // Chuỗi đủ dài để chứa định dạng
+  snprintf(formattedDateTime, sizeof(formattedDateTime), 
+           "%04d-%02d-%02d %02d:%02d:%02d",
+           now.year(), now.month(), now.day(),
+           now.hour(), now.minute(), now.second());
+
+  Serial.println("Thời gian hiện tại:");
+  Serial.println(formattedDateTime);
+  
 }
