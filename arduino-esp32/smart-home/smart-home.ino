@@ -9,13 +9,16 @@
 #include <NTPClient.h>
 
 #include "MQTTHandler.h"
+#include "MQ135Handler.h"
 const char* sensor1_topic = "MQ135/FireAlarm";
 
-/*constants*/
+
 #define PIN_MQ135 32
 #define DHT_PIN 15
+#define BUZZER_PIN 13
 #define DHTTYPE DHT22
 DHT dht(DHT_PIN, DHTTYPE);
+
 MQ135 mq135_sensor(PIN_MQ135);
 
 
@@ -39,6 +42,8 @@ void setup() {
   Serial.println("Connecting to WiFi...");
 
   WiFi.begin(ssid, password);
+  
+
 
   // Thời gian chờ tối đa: 30 giây
   unsigned long startAttemptTime = millis();
@@ -65,6 +70,15 @@ void setup() {
   }
 
   initMQTT(ssid, password); // Khởi tạo MQTT  
+
+  
+   dht.begin();
+   initMQ135(MQ135_PIN);
+
+    // Thiết lập chân buzzer
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW); // Tắt buzzer ban đầu
+
   
 }
 void loop() {
@@ -75,9 +89,27 @@ void loop() {
   String status = "inactive";
   String jsonPayload = "{ \"time\": \"" + currentTime + "\", \"status\": \"" + status + "\" }";
 
-   publishMessage(sensor1_topic, jsonPayload, true);
+   //publishMessage(sensor1_topic, jsonPayload, true);
 
-  delay(10000); // Publish mỗi 10 giây
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    Serial.print("Temperature:"); 
+    Serial.println(String(t));
+    Serial.print("Humidity: ");
+    Serial.println(String(h)); 
+
+    Serial.print("Gas PPM: "); 
+    Serial.println(String(analogRead(PIN_MQ135)));
+    // Đọc giá trị từ cảm biến MQ135
+   while ( analogRead(PIN_MQ135) > 3200){
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(100); // Kêu trong 100ms
+        digitalWrite(BUZZER_PIN, LOW);
+   }
+
+    
+
+  delay(2000); 
 }
 
 String getCurrentDateTime(){
