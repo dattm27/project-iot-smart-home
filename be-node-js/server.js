@@ -9,17 +9,15 @@ const app = express();
 // Khai báo các hằng
 const port = 4000;
 const ip = '192.168.1.4';
-const brokerUrl = 'mqtts://c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud';
-const caCert = fs.readFileSync('./CERT.txt');
+const brokerUrl = 'mqtt://192.168.1.4'; // Static IP
 const options = {
-    port: 8883,
-    username: 'hivemq.webclient.1732431972503',
-    password: 'mP<195YJ2VxlDG&s,w$r',
+    port: 1883,
+    //username: 'hivemq.webclient.1732431972503',
+    //password: 'mP<195YJ2VxlDG&s,w$r',
     clientId: 'nodejs-client',
     clean: true,
     reconnectPeriod: 1000,
     connectTimeout: 30 * 1000,
-    ca: caCert,
 };
 // Liệt kê các topic
 const fireAlarmTopic = 'MQ135/FireAlarm';
