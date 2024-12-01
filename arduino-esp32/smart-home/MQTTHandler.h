@@ -15,5 +15,6 @@ extern const int mqtt_port;
 void initMQTT(const char* ssid, const char* password);
 void publishMessage(const char* topic, String payload, boolean retained);
 void handleMQTT();
+String genAlarmMsg(String currentTime, String status) ;
 
 #endif // MQTT_HANDLER_H
