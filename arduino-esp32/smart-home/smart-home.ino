@@ -25,8 +25,8 @@ MQ135 mq135_sensor(PIN_MQ135);
 
 
 
-const char *ssid     = "La Thuy";
-const char *password = "hoilamchi";
+const char *ssid     = "GOCVUONG";
+const char *password = "chinmuoido";
 const long utcOffsetInSeconds = 7 * 3600; //Hanoi timezone (GMT+7)
 
 
@@ -73,7 +73,7 @@ void setup() {
 
   
    dht.begin();
-   initMQ135(MQ135_PIN);
+   initMQ135(PIN_MQ135);
 
     // Thiết lập chân buzzer
   pinMode(BUZZER_PIN, OUTPUT);
@@ -98,6 +98,10 @@ void loop() {
     Serial.print("Humidity: ");
     Serial.println(String(h)); 
 
+    readCO2();
+
+    readPPM();
+    
     Serial.print("Gas PPM: "); 
     Serial.println(String(analogRead(PIN_MQ135)));
     // Đọc giá trị từ cảm biến MQ135
