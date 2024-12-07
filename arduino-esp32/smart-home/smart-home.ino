@@ -18,21 +18,31 @@ const char* sensor1_topic = "MQ135/FireAlarm";
 #define BUZZER_PIN 13
 #define DHTTYPE DHT22
 #define BUTTON_PIN 14
+#define BUTTON_2_PIN 18
 #define LED_1 5
+
+//Fan 
+#define INA 25
+#define INB 26
+
+//LIGHT
+#define LIGHT_SENSOR_PIN 33
+
 DHT dht(DHT_PIN, DHTTYPE);
 
 MQ135 mq135_sensor(PIN_MQ135);
 unsigned long lastNotify = 0;
 
 
-//const char *ssid     = "GOCVUONG";
-//const char *password = "chinmuoido";
-const char *ssid = "THANG_2G";
-const char *password = "0967240219";
+const char *ssid     = "La Thuy";
+const char *password = "hoilamchi";
+//const char *ssid = "THANG_2G";
+//const char *password = "0967240219";
 const long utcOffsetInSeconds = 7 * 3600; //Hanoi timezone (GMT+7)
 
 
 int ledState = HIGH;
+bool fanOn = true;
  
         
 // Initiate UDP -> init timeClient
@@ -75,7 +85,7 @@ void setup() {
     Serial.println(getCurrentDateTime());
   }
 
-  initMQTT(ssid, password); // Khởi tạo MQTT  
+//    initMQTT(ssid, password); // Khởi tạo MQTT  
 
   
    dht.begin();
@@ -87,14 +97,26 @@ void setup() {
     pinMode(LED_1 , OUTPUT);
     digitalWrite(LED_1 , ledState); //bật đèn ban đầu
 
+    // Thiết lập quạt
+    pinMode(INA, OUTPUT);
+    pinMode(INB, OUTPUT);
+
+    // Bật motor quay thuận
+    digitalWrite(INA, HIGH);
+    digitalWrite(INB, LOW);
+
+     pinMode(LIGHT_SENSOR_PIN, INPUT);
+
   
 }
 void loop() {
  
-    handleMQTT(); // Xử lý MQTT
+//    handleMQTT(); // Xử lý MQTT
     //Chống nhảy phím
     unsigned long lastDebounceTime = 0;
     const unsigned long debounceDelay = 200;
+       unsigned long lastDebounceTime2 = 0;
+    const unsigned long debounceDelay2 = 200;
 
      int buttonState = digitalRead(BUTTON_PIN);
       if (buttonState == HIGH && (millis() - lastDebounceTime > debounceDelay)) {
@@ -109,7 +131,39 @@ void loop() {
         digitalWrite(LED_1, ledState); // Cập nhật trạng thái LED
         
       } 
+     int  buttonState2 = digitalRead(BUTTON_2_PIN);
+      if (buttonState2 == HIGH && (millis() - lastDebounceTime2 > debounceDelay2)) {
+        lastDebounceTime2 = millis();
+        // Buzzer kêu
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(100); // Kêu trong 100ms
+        digitalWrite(BUZZER_PIN, LOW);
 
+        // Đổi trạng thái LED
+        if (fanOn){
+           digitalWrite(INA, LOW);
+           digitalWrite(INB, LOW);
+           fanOn = false;
+        }
+        else {
+           digitalWrite(INA, HIGH);
+           digitalWrite(INB, LOW);
+           fanOn = true;
+        }
+      } 
+
+     int lightLevel = analogRead(LIGHT_SENSOR_PIN);
+     if (lightLevel < 80 && ledState == LOW && millis() - lastDebounceTime > 20000 ) {
+         ledState = !ledState;
+        digitalWrite(LED_1, ledState);
+     }
+     if (lightLevel > 200  && ledState == HIGH && millis() - lastDebounceTime > 20000 ) {
+         ledState = !ledState;
+        digitalWrite(LED_1, ledState);
+     }
+
+    Serial.print("Light level = ");
+    Serial.println(lightLevel);   // the raw analog reading
     float h = dht.readHumidity();
     float t = dht.readTemperature();
     Serial.print("Temperature:"); 
@@ -117,13 +171,23 @@ void loop() {
     Serial.print("Humidity: ");
     Serial.println(String(h)); 
 
+    if (!fanOn && t > 40 &&  millis() - lastDebounceTime2 > 20000) {
+            digitalWrite(INA, HIGH);
+           digitalWrite(INB, LOW);
+           fanOn = true;
+    }
+     if (fanOn && t <20  &&  millis() - lastDebounceTime2 > 20000) {
+            digitalWrite(INA, LOW);
+           digitalWrite(INB, LOW);
+           fanOn = false;
+    }
     readCO2();
 
     readPPM();
     
     Serial.print("Gas PPM: "); 
     Serial.println(String(analogRead(PIN_MQ135)));
-    FireAlarmCheck();
+//    FireAlarmCheck();
 
     
     
@@ -144,7 +208,7 @@ void FireAlarmCheck(){
 
         if ( (millis() - lastNotify > 1000*60 )|| !lastNotify ) {
           
-          // Hàm bạn đã viết
+       
           String status = "active";
           String currentDateTime = getCurrentDateTime();
           String alarmMsg = genAlarmMsg(currentDateTime, status);
