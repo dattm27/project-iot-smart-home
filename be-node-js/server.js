@@ -26,6 +26,7 @@ const fireAlarmTopic = 'MQ135/FireAlarm';
 const MQ135StatisticsTopic = 'MQ135/Statistics';
 const LightsControlTopic = 'lights/01';
 const FansControlTopic = 'fans/01';
+const MQ135PeriodTopic = 'MQ135/Period';
 
 // Khai báo các model
 const FireAlarm = require('./models/FireAlarm');  // Import model FireAlarm từ thư mục models
@@ -36,7 +37,7 @@ const Fan = require('./models/Fan');
 //Khai báo các biến toàn cục
 let isFire = false;
 
-// kết nối với database
+// Kết nối với database
 connectDB();
 
 // Kiểm tra đầu vào có là 1 json không
@@ -47,6 +48,32 @@ function isValidJson(str) {
         return false;
     }
     return true;
+}
+
+// Hàm trả về chất lượng không khí
+function evaluateAirQuality(co2, co) {
+    // Định nghĩa ngưỡng
+    const co2Levels = { GOOD: 400, NORMAL: 1000 };
+    const coLevels = { GOOD: 9, NORMAL: 35 };
+
+    // Đánh giá CO2
+    let co2Status = "BAD";
+    if (co2 <= co2Levels.GOOD) co2Status = "GOOD";
+    else if (co2 <= co2Levels.NORMAL) co2Status = "NORMAL";
+
+    // Đánh giá CO
+    let coStatus = "BAD";
+    if (co <= coLevels.GOOD) coStatus = "GOOD";
+    else if (co <= coLevels.NORMAL) coStatus = "NORMAL";
+
+    // Kết hợp đánh giá
+    if (co2Status === "GOOD" && coStatus === "GOOD") {
+        return "GOOD";
+    } else if (co2Status === "BAD" || coStatus === "BAD") {
+        return "BAD";
+    } else {
+        return "NORMAL";
+    }
 }
 
 // Kết nối với mqtt
@@ -91,12 +118,31 @@ mqttClient.on('message', async (topic, message) => {
                     else
                         isFire = true;
                     // Tạo mới một FireAlarm từ các tham số nhận được
-                    const newFireAlarm = new FireAlarm({
-                        time,
-                        status
-                    });
-                    // Lưu vào MongoDB
-                    await newFireAlarm.save();
+                    const latestFireAlarm = await FireAlarm.findOne().sort({ timestamp: -1 });
+
+                    if (latestFireAlarm) {
+                        // So sánh status của bản ghi gần nhất với status mới
+                        if (latestFireAlarm.status === status) {
+                            console.log('Trạng thái hiện tại trùng với trạng thái gần nhất, không thực hiện thay đổi.');
+                            return;
+                        }
+                        else {
+                            console.log('Trạng thái mới khác với trạng thái hiện tại, cập nhật trạng thái và thời gian.');
+                            // Cập nhật trạng thái và thời gian
+                            latestFireAlarm.status = status;
+                            latestFireAlarm.time = time;
+                            latestFireAlarm.timestamp = Date.now();
+                            await latestFireAlarm.save();
+                        }
+                    }
+                    else {
+                        const newFireAlarm = new FireAlarm({
+                            time,
+                            status
+                        });
+                        // Lưu vào MongoDB
+                        await newFireAlarm.save();
+                    }
                     console.log(`Thông báo cháy đã được lưu vào MongoDB với time: ${time} và status: ${status}`);
                 } else {
                     console.error('Thông điệp không hợp lệ. Thiếu time hoặc status.');
@@ -113,20 +159,21 @@ mqttClient.on('message', async (topic, message) => {
             if (isValidJson(payload)) {
 
                 // Giả sử payload là một chuỗi JSON có dạng { "time": "2024-11-24T12:00:00Z", "status": "active" }
-                const { Time, AirQuality, CO2_PPM, CO_PPM } = JSON.parse(payload);
+                const { time, co2_ppm, co_ppm } = JSON.parse(payload);
 
                 // Kiểm tra nếu tham số time và status hợp lệ
-                if (Time && AirQuality && CO2_PPM !== undefined && CO_PPM !== undefined) {
+                if (time && co2_ppm !== undefined && co_ppm !== undefined) {
                     // Tạo mới một MQ135Statistics từ các tham số nhận được
+                    const AirQuality = evaluateAirQuality(co2_ppm, co_ppm);
                     const newMQ135Statistics = new MQ135Statistics({
-                        time: Time,
+                        time: time,
                         airQuality: AirQuality,
-                        co2_ppm: CO2_PPM,
-                        co_ppm: CO_PPM
+                        co2_ppm: co2_ppm,
+                        co_ppm: co_ppm
                     });
                     // Lưu thông tin MQ135Statistics vào MongoDB
                     await newMQ135Statistics.save();
-                    console.log(`Thông báo MQ135Statistics đã được lưu vào MongoDB với time: ${Time}`);
+                    console.log(`Thông báo MQ135Statistics đã được lưu vào MongoDB với time: ${time}` + ' với nội dung là ' + newMQ135Statistics);
                 } else {
                     console.error('Thông điệp không hợp lệ. Thiếu thông tin cần thiết.');
                 }
@@ -473,6 +520,23 @@ app.delete('/lights/', async (req, res) => {
     }
 });
 
+////////////////////////////////////////// XU LI LIEN QUAN DEN MQ135 //////////////////////////////////////////
+
+app.delete('/fire-alarms', async (req, res) => {
+    try {
+        // Xóa tất cả các tài liệu trong collection FireAlarm
+        const result = await FireAlarm.deleteMany({});
+        res.status(200).json({
+            message: 'Tất cả thông báo báo cháy đã được xóa',
+            deletedCount: result.deletedCount, // Số tài liệu đã xóa
+        });
+    } catch (error) {
+        console.error('Lỗi khi xóa thông báo báo cháy:', error);
+        res.status(500).json({ error: 'Lỗi khi xóa tất cả thông báo báo cháy' });
+    }
+});
+
+////////////////////////////////////////// ------------------------ //////////////////////////////////////////
 // Hàm kiểm tra và tự động bật/tắt đèn theo thời gian
 const checkAutoLights = async () => {
     try {
