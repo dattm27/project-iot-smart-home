@@ -10,7 +10,9 @@
 
 #include "MQTTHandler.h"
 #include "MQ135Handler.h"
+#include "FanHandler.h"
 const char* sensor1_topic = "MQ135/FireAlarm";
+const char *mqttStatistic = "MQ135/Statistics";
 
 
 #define PIN_MQ135 32
@@ -32,12 +34,17 @@ DHT dht(DHT_PIN, DHTTYPE);
 
 MQ135 mq135_sensor(PIN_MQ135);
 unsigned long lastNotify = 0;
+unsigned long lastAirQualityStatusUpdate = 0;
+String fireAlarmStatus = "inactive";
 
 
-const char *ssid     = "La Thuy";
-const char *password = "hoilamchi";
+
+//const char *ssid     = "La Thuy";
+//const char *password = "hoilamchi";
 //const char *ssid = "THANG_2G";
 //const char *password = "0967240219";
+const char *ssid = "iPhone của Sơn";
+const char *password = "20222022";
 const long utcOffsetInSeconds = 7 * 3600; //Hanoi timezone (GMT+7)
 
 
@@ -85,7 +92,7 @@ void setup() {
     Serial.println(getCurrentDateTime());
   }
 
-//    initMQTT(ssid, password); // Khởi tạo MQTT  
+    initMQTT(ssid, password); // Khởi tạo MQTT  
 
   
    dht.begin();
@@ -98,8 +105,9 @@ void setup() {
     digitalWrite(LED_1 , ledState); //bật đèn ban đầu
 
     // Thiết lập quạt
-    pinMode(INA, OUTPUT);
-    pinMode(INB, OUTPUT);
+//    pinMode(INA, OUTPUT);
+//    pinMode(INB, OUTPUT);
+    initFan(INA, INB);
 
     // Bật motor quay thuận
     digitalWrite(INA, HIGH);
@@ -111,7 +119,7 @@ void setup() {
 }
 void loop() {
  
-//    handleMQTT(); // Xử lý MQTT
+    //handleMQTT(); // Xử lý MQTT
     //Chống nhảy phím
     unsigned long lastDebounceTime = 0;
     const unsigned long debounceDelay = 200;
@@ -131,36 +139,15 @@ void loop() {
         digitalWrite(LED_1, ledState); // Cập nhật trạng thái LED
         
       } 
-     int  buttonState2 = digitalRead(BUTTON_2_PIN);
-      if (buttonState2 == HIGH && (millis() - lastDebounceTime2 > debounceDelay2)) {
-        lastDebounceTime2 = millis();
-        // Buzzer kêu
-        digitalWrite(BUZZER_PIN, HIGH);
-        delay(100); // Kêu trong 100ms
-        digitalWrite(BUZZER_PIN, LOW);
 
-        // Đổi trạng thái LED
-        if (fanOn){
-           digitalWrite(INA, LOW);
-           digitalWrite(INB, LOW);
-           fanOn = false;
-        }
-        else {
-           digitalWrite(INA, HIGH);
-           digitalWrite(INB, LOW);
-           fanOn = true;
-        }
-      } 
+     
 
      int lightLevel = analogRead(LIGHT_SENSOR_PIN);
      if (lightLevel < 80 && ledState == LOW && millis() - lastDebounceTime > 20000 ) {
          ledState = !ledState;
         digitalWrite(LED_1, ledState);
      }
-     if (lightLevel > 200  && ledState == HIGH && millis() - lastDebounceTime > 20000 ) {
-         ledState = !ledState;
-        digitalWrite(LED_1, ledState);
-     }
+
 
     Serial.print("Light level = ");
     Serial.println(lightLevel);   // the raw analog reading
@@ -170,24 +157,32 @@ void loop() {
     Serial.println(String(t));
     Serial.print("Humidity: ");
     Serial.println(String(h)); 
-
-    if (!fanOn && t > 40 &&  millis() - lastDebounceTime2 > 20000) {
-            digitalWrite(INA, HIGH);
-           digitalWrite(INB, LOW);
-           fanOn = true;
+    int  buttonState2 = digitalRead(BUTTON_2_PIN);
+   if (buttonState2 == HIGH && (millis() - lastDebounceTime2 > debounceDelay2)) {
+        lastDebounceTime2 = millis();
+         digitalWrite(BUZZER_PIN, HIGH);
+        delay(100); // Kêu trong 100ms
+        digitalWrite(BUZZER_PIN, LOW);
+        // Bật/tắt quạt khi nhấn nút
+        if (isFanOn()) {
+            turnFanOff();
+        } else {
+            turnFanOn();
+        }
     }
-     if (fanOn && t <20  &&  millis() - lastDebounceTime2 > 20000) {
-            digitalWrite(INA, LOW);
-           digitalWrite(INB, LOW);
-           fanOn = false;
-    }
-    readCO2();
 
-    readPPM();
-    
+    // Điều kiện tự động bật/tắt quạt dựa trên nhiệt độ
+    if (!isFanOn() && t > 40 && millis() - lastDebounceTime2 > 20000) {
+        turnFanOn();
+    }
+    if (isFanOn() && t < 20 && millis() - lastDebounceTime2 > 20000) {
+        turnFanOff();
+    }
+   
     Serial.print("Gas PPM: "); 
     Serial.println(String(analogRead(PIN_MQ135)));
-//    FireAlarmCheck();
+   FireAlarmCheck();
+   updateAirqualityStatus(1000*60);
 
     
     
@@ -206,12 +201,12 @@ void FireAlarmCheck(){
            digitalWrite(BUZZER_PIN, LOW);
         }
 
-        if ( (millis() - lastNotify > 1000*60 )|| !lastNotify ) {
+        if ( fireAlarmStatus.equals("inactive")|| !lastNotify ) {
           
        
-          String status = "active";
+         fireAlarmStatus = "active";
           String currentDateTime = getCurrentDateTime();
-          String alarmMsg = genAlarmMsg(currentDateTime, status);
+          String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
       
           publishMessage(sensor1_topic, alarmMsg, true);
           lastNotify = millis();
@@ -222,9 +217,9 @@ void FireAlarmCheck(){
       if ( millis() - lastNotify > 1000*60) {
           
           // Hàm bạn đã viết
-          String status = "inactive";
+          fireAlarmStatus = "inactive";
           String currentDateTime = getCurrentDateTime();
-          String alarmMsg = genAlarmMsg(currentDateTime, status);
+          String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
       
           publishMessage(sensor1_topic, alarmMsg, true);
           lastNotify = millis();
@@ -232,6 +227,21 @@ void FireAlarmCheck(){
    }
 }
 
+void updateAirqualityStatus(long interval) {
+  
+    if (millis() - lastAirQualityStatusUpdate > interval) {
+       float CO2 = readCO2();
+
+       float CO = readPPM();
+       String currentDateTime = getCurrentDateTime();
+       String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, CO2, CO);
+       publishMessage(mqttStatistic, airQualityUpdateMsg, true);
+       lastAirQualityStatusUpdate = millis();
+       
+    
+    }
+  
+}
 
 String getCurrentDateTime(){
     timeClient.update();
