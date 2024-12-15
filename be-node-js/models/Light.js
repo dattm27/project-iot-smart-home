@@ -28,6 +28,11 @@ const lightSchema = new mongoose.Schema({
     autoOffTime: {
         type: Date,  // Thời gian tự động tắt đèn
     },
+    // Trạng thái kiểm soát tự động
+    isAutoControlled: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 // Tạo model từ schema

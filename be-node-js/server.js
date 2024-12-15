@@ -213,7 +213,7 @@ app.put('/fans/OnOff', async (req, res) => {
     if (type !== 1 && type !== 0) {
         return res.status(400).json({ error: 'Tham số "type" phải là 1 (bật) hoặc 0 (tắt)' });
     }
-
+    console.log("co tin hieu bat/tat quat", req.body);
     try {
         // Tìm quạt theo name
         let fan = await Fan.findOne({ name });
@@ -290,14 +290,14 @@ app.get('/fans/', async (req, res) => {
         // Lấy tất cả đèn từ cơ sở dữ liệu
         const fans = await Fan.find();
 
-        // Kiểm tra nếu danh sách đèn trống
+        // Kiểm tra nếu danh sách quạt trống
         if (fans.length === 0) {
             return res.status(404).json({ error: 'Không có quạt nào trong cơ sở dữ liệu' });
         }
 
         // Trả về danh sách đèn
         res.status(200).json({
-            message: 'Danh sách đèn đã được lấy thành công',
+            message: 'Danh sách quạt đã được lấy thành công',
             fans,
         });
     } catch (error) {
@@ -306,12 +306,60 @@ app.get('/fans/', async (req, res) => {
     }
 });
 
+// Xử lí thay đổi chức năng hẹn giờ cho quạt
+app.put('/fans/Timer/', async (req, res) => {
+    const { name, timerEnabled, autoOnTime, autoOffTime } = req.body;
+
+    if (!name) {
+        return res.status(400).json({ error: 'Cần cung cấp tên quạt (name)' });
+    }
+
+    try {
+        // Tìm quạt theo name
+        let fan = await Fan.findOne({ name });
+
+        if (!fan) {
+            return res.status(404).json({ error: 'Quạt không tồn tại' });
+        }
+
+        // Cập nhật chế độ hẹn giờ
+        Fan.timerEnabled = timerEnabled || false;
+
+        // Nếu bật chế độ hẹn giờ, cập nhật thời gian bật và tắt
+        if (timerEnabled) {
+            if (autoOnTime) {
+                Fan.autoOnTime = new Date(autoOnTime);  // Thời gian bật đèn
+            }
+            if (autoOffTime) {
+                Fan.autoOffTime = new Date(autoOffTime);  // Thời gian tắt đèn
+            }
+        } else {
+            // Nếu tắt chế độ hẹn giờ, xóa thời gian bật và tắt
+            Fan.autoOnTime = null;
+            Fan.autoOffTime = null;
+        }
+
+        // Lưu quạt mới vào cơ sở dữ liệu
+        await fan.save();
+
+        // Trả về phản hồi thành công
+        res.status(200).json({
+            message: 'Chế độ hẹn giờ đã được cập nhật',
+            timerEnabled: fan.timerEnabled,
+            autoOnTime: fan.autoOnTime,
+            autoOffTime: fan.autoOffTime
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Lỗi khi cập nhật chế độ hẹn giờ' });
+    }
+});
+
 // Xóa quạt theo tên
 app.delete('/fans/', async (req, res) => {
     const { name } = req.body;
 
     if (!name) {
-        return res.status(400).json({ error: 'Cần cung cấp tên đèn để xóa' });
+        return res.status(400).json({ error: 'Cần cung cấp tên quạt để xóa' });
     }
 
     try {
@@ -350,7 +398,7 @@ app.put('/lights/OnOff', async (req, res) => {
     if (type !== 1 && type !== 0) {
         return res.status(400).json({ error: 'Tham số "type" phải là 1 (bật) hoặc 0 (tắt)' });
     }
-
+    console.log("co tin hieu bat/tat den", req.body);
     try {
         // Tìm đèn theo name
         let light = await Light.findOne({ name });
@@ -536,6 +584,23 @@ app.delete('/fire-alarms', async (req, res) => {
     }
 });
 
+app.get('/mq135statistics', async (req, res) => {
+    try {
+        // Lấy tham số n từ query, nếu không có mặc định là 10
+        const NumOfRecords = parseInt(req.query.NumOfRecords) || 10;
+
+        // Lấy n bản ghi mới nhất, sắp xếp giảm dần theo timestamp
+        const records = await MQ135Statistics.find().sort({ timestamp: -1 }).limit(NumOfRecords);
+
+        // Trả về kết quả JSON
+        res.status(200).json(records);
+    } catch (error) {
+        // Xử lý lỗi và trả về phản hồi lỗi
+        res.status(500).json({ message: 'Lỗi khi lấy dữ liệu MQ135 Statistics', error: error.message });
+    }
+});
+
+
 ////////////////////////////////////////// ------------------------ //////////////////////////////////////////
 // Hàm kiểm tra và tự động bật/tắt đèn theo thời gian
 const checkAutoLights = async () => {
@@ -545,37 +610,61 @@ const checkAutoLights = async () => {
 
         lights.forEach(async (light) => {
             const currentTime = new Date();
+            const currentHour = currentTime.getHours();
+            const currentMinute = currentTime.getMinutes();
+
             const autoOnTime = new Date(light.autoOnTime);
             const autoOffTime = new Date(light.autoOffTime);
 
-            // Kiểm tra nếu hiện tại là thời gian bật đèn
-            if (currentTime >= autoOnTime && currentTime < autoOffTime && light.status === 0) {
-                // Cập nhật trạng thái bật đèn
-                light.status = 1;
-                await light.save();
+            const autoOnHour = autoOnTime.getHours();
+            const autoOnMinute = autoOnTime.getMinutes();
 
-                // Gửi thông điệp MQTT để bật đèn
-                const message = JSON.stringify({ type: 1 });
-                mqttClient.publish(LightsControlTopic, message, { qos: 1 });
-                console.log(`Đèn ${light.name} đã bật tự động.`);
+            const autoOffHour = autoOffTime.getHours();
+            const autoOffMinute = autoOffTime.getMinutes();
+
+            // Hàm kiểm tra giờ và phút
+            const isTimeBetween = (hour, minute, startHour, startMinute, endHour, endMinute) => {
+                const currentTimeInMinutes = hour * 60 + minute;
+                const startTimeInMinutes = startHour * 60 + startMinute;
+                const endTimeInMinutes = endHour * 60 + endMinute;
+                return currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes < endTimeInMinutes;
+            };
+
+            // Nếu hiện tại nằm trong thời gian bật đèn
+            if (isTimeBetween(currentHour, currentMinute, autoOnHour, autoOnMinute, autoOffHour, autoOffMinute)) {
+                // Bật đèn tự động nếu chưa được bật bởi hệ thống
+                if (!light.isAutoControlled && light.status === 0) {
+                    light.status = 1;
+                    light.isAutoControlled = true; // Đánh dấu là đèn đã được bật tự động
+                    await light.save();
+
+                    // Gửi thông điệp MQTT để bật đèn
+                    const message = JSON.stringify({ type: 1 });
+                    mqttClient.publish(LightsControlTopic, message, { qos: 1 });
+                    console.log(`Đèn ${light.name} đã bật tự động.`);
+                }
             }
+            // Nếu hiện tại không nằm trong khoảng thời gian bật
+            else {
+                // Tắt đèn tự động nếu chưa được tắt bởi hệ thống
+                if (light.isAutoControlled && light.status === 1) {
+                    light.status = 0;
+                    light.isAutoControlled = false; // Đánh dấu là đèn đã được tắt tự động
+                    await light.save();
 
-            // Kiểm tra nếu hiện tại là thời gian tắt đèn
-            if (currentTime >= autoOffTime && light.status === 1) {
-                // Cập nhật trạng thái tắt đèn
-                light.status = 0;
-                await light.save();
-
-                // Gửi thông điệp MQTT để tắt đèn
-                const message = JSON.stringify({ type: 0 });
-                mqttClient.publish(LightsControlTopic, message, { qos: 1 });
-                console.log(`Đèn ${light.name} đã tắt tự động.`);
+                    // Gửi thông điệp MQTT để tắt đèn
+                    const message = JSON.stringify({ type: 0 });
+                    mqttClient.publish(LightsControlTopic, message, { qos: 1 });
+                    console.log(`Đèn ${light.name} đã tắt tự động.`);
+                }
             }
         });
     } catch (err) {
         console.error('Lỗi khi kiểm tra và tự động bật/tắt đèn:', err);
     }
 };
+
+
 
 // Thiết lập một chu kỳ để kiểm tra mỗi phút (60000ms)
 setInterval(checkAutoLights, 60000);

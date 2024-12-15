@@ -28,6 +28,10 @@ const fanSchema = new mongoose.Schema({
     autoOffTime: {
         type: Date,  // Thời gian tự động tắt đèn
     },
+    isAutoControlled: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 // Tạo model từ schema
