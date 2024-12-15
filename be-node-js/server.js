@@ -1,6 +1,7 @@
 // Import thư viện express
 const express = require('express');
 const connectDB = require('./database');
+const { DateTime } = require('luxon');
 const fs = require('fs');
 const axios = require('axios');
 const mqtt = require('mqtt');
@@ -398,7 +399,7 @@ app.put('/lights/OnOff', async (req, res) => {
     if (type !== 1 && type !== 0) {
         return res.status(400).json({ error: 'Tham số "type" phải là 1 (bật) hoặc 0 (tắt)' });
     }
-    console.log("co tin hieu bat/tat den", req.body);
+    //console.log("co tin hieu bat/tat den", req.body);
     try {
         // Tìm đèn theo name
         let light = await Light.findOne({ name });
@@ -438,7 +439,7 @@ app.put('/lights/Timer/', async (req, res) => {
     if (!name) {
         return res.status(400).json({ error: 'Cần cung cấp tên đèn (name)' });
     }
-
+    //console.log("BAT DEN TU DONG: ", name, timerEnabled, autoOffTime, autoOnTime);
     try {
         // Tìm đèn theo name
         let light = await Light.findOne({ name });
@@ -463,7 +464,7 @@ app.put('/lights/Timer/', async (req, res) => {
             light.autoOnTime = null;
             light.autoOffTime = null;
         }
-
+        //console.log("ADD DEN: ", light);
         // Lưu đèn mới vào cơ sở dữ liệu
         await light.save();
 
@@ -609,19 +610,21 @@ const checkAutoLights = async () => {
         const lights = await Light.find({ timerEnabled: true });
 
         lights.forEach(async (light) => {
-            const currentTime = new Date();
-            const currentHour = currentTime.getHours();
-            const currentMinute = currentTime.getMinutes();
+            const currentTime = DateTime.now().setZone('Asia/Ho_Chi_Minh');
+            //console.log("THOI GIAN HIEN TAI: ", currentTime);
+            const currentHour = currentTime.hour;
+            const currentMinute = currentTime.minute;
 
             const autoOnTime = new Date(light.autoOnTime);
             const autoOffTime = new Date(light.autoOffTime);
 
-            const autoOnHour = autoOnTime.getHours();
-            const autoOnMinute = autoOnTime.getMinutes();
+            //console.log("NGAY BAT DAU: ", autoOnTime);
+            const autoOnHour = autoOnTime.getUTCHours();
+            const autoOnMinute = autoOnTime.getUTCMinutes();
 
-            const autoOffHour = autoOffTime.getHours();
-            const autoOffMinute = autoOffTime.getMinutes();
-
+            const autoOffHour = autoOffTime.getUTCHours();
+            const autoOffMinute = autoOffTime.getUTCMinutes();
+            //console.log("GIO VA PHUT: ", autoOnHour, autoOnMinute, autoOffHour, autoOffMinute, currentHour, currentMinute);
             // Hàm kiểm tra giờ và phút
             const isTimeBetween = (hour, minute, startHour, startMinute, endHour, endMinute) => {
                 const currentTimeInMinutes = hour * 60 + minute;
