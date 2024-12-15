@@ -57,7 +57,7 @@ const HomePage: React.FC = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.card}
-            onPress={() => Alert.alert('Monitoring pressed')}
+            onPress={() => navigation.navigate('Monitoring')}
           >
             <Icon name="bar-chart" size={40} color="#fff" />  {/* Changed to use FontAwesome icons */}
             <Text style={styles.buttonText}>Monitoring</Text>
