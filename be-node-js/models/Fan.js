@@ -17,6 +17,15 @@ const fanSchema = new mongoose.Schema({
         type: String,
         required: true,  // Cần phải có thông tin phòng
     },
+    autoOnByTemperature: {
+        type: Boolean,
+        default: false,
+    },
+    autoOnTemperature: {
+        type: Number,
+        required: false,
+        default: 25,
+    },
     // Các trường liên quan đến hẹn giờ
     timerEnabled: {
         type: Boolean,
