@@ -41,10 +41,10 @@ String fireAlarmStatus = "inactive";
 
 //const char *ssid     = "La Thuy";
 //const char *password = "hoilamchi";
-//const char *ssid = "THANG_2G";
-//const char *password = "0967240219";
-const char *ssid = "iPhone của Sơn";
-const char *password = "20222022";
+const char *ssid = "THANG_2G";
+const char *password = "0967240219";
+//const char *ssid = "iPhone của Sơn";
+//const char *password = "20222022";
 const long utcOffsetInSeconds = 7 * 3600; //Hanoi timezone (GMT+7)
 
 
@@ -119,7 +119,7 @@ void setup() {
 }
 void loop() {
  
-    //handleMQTT(); // Xử lý MQTT
+    handleMQTT(); // Xử lý MQTT
     //Chống nhảy phím
     unsigned long lastDebounceTime = 0;
     const unsigned long debounceDelay = 200;
@@ -153,10 +153,10 @@ void loop() {
     Serial.println(lightLevel);   // the raw analog reading
     float h = dht.readHumidity();
     float t = dht.readTemperature();
-    Serial.print("Temperature:"); 
-    Serial.println(String(t));
-    Serial.print("Humidity: ");
-    Serial.println(String(h)); 
+//    Serial.print("Temperature:"); 
+//    Serial.println(String(t));
+//    Serial.print("Humidity: ");
+//    Serial.println(String(h)); 
     int  buttonState2 = digitalRead(BUTTON_2_PIN);
    if (buttonState2 == HIGH && (millis() - lastDebounceTime2 > debounceDelay2)) {
         lastDebounceTime2 = millis();
@@ -166,23 +166,27 @@ void loop() {
         // Bật/tắt quạt khi nhấn nút
         if (isFanOn()) {
             turnFanOff();
+            genFanMsg("0");
         } else {
-            turnFanOn();
+            turnFanOn(); 
+            genFanMsg("1");
         }
     }
 
     // Điều kiện tự động bật/tắt quạt dựa trên nhiệt độ
-    if (!isFanOn() && t > 40 && millis() - lastDebounceTime2 > 20000) {
-        turnFanOn();
-    }
-    if (isFanOn() && t < 20 && millis() - lastDebounceTime2 > 20000) {
-        turnFanOff();
-    }
+//    if (!isFanOn() && t > 40 && millis() - lastDebounceTime2 > 20000) {
+//        turnFanOn();
+//        genFanMsg("true");
+//    }
+//    if (isFanOn() && t < 20 && millis() - lastDebounceTime2 > 20000) {
+//        turnFanOff();
+//        genFanMsg("false");
+//    }
    
-    Serial.print("Gas PPM: "); 
-    Serial.println(String(analogRead(PIN_MQ135)));
+    //Serial.print("Gas PPM: "); 
+    //Serial.println(String(analogRead(PIN_MQ135)));
    FireAlarmCheck();
-   updateAirqualityStatus(1000*60);
+   updateAirqualityStatus(1000*20);
 
     
     
@@ -234,7 +238,8 @@ void updateAirqualityStatus(long interval) {
 
        float CO = readPPM();
        String currentDateTime = getCurrentDateTime();
-       String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, CO2, CO);
+         float t = dht.readTemperature();
+       String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, CO2, CO, t);
        publishMessage(mqttStatistic, airQualityUpdateMsg, true);
        lastAirQualityStatusUpdate = millis();
        

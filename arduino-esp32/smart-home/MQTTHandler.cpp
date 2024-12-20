@@ -9,6 +9,10 @@
 const char* mqtt_server = "192.168.1.4"; // Không sử dụng "mqtt://"
 const char* mqtt_username = "dattran";
 const char* mqtt_password = "Dattran2";
+const char* LIGHT_SERVER_TOPIC = "lights/01/server";
+const char* FAN_SERVER_TOPIC = "fans/01/server";
+const char* LIGHT_BUTTON_TOPIC = "lights/01/button";
+const char* FAN_BUTTON_TOPIC = "fans/01/button";
 const int mqtt_port = 1883; // Mosquitto port mặc định
 
 // MQTT client và WiFi client
@@ -34,7 +38,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 
     // Kiểm tra topic và xử lý nếu là "lights/01"
-    if (String(topic) == "fans/01") {
+    if (String(topic) == FAN_SERVER_TOPIC) {
         int type = doc["type"]; // Lấy giá trị "type" từ JSON
         digitalWrite(BUZZER_PIN, HIGH);
         delay(100); // Kêu trong 100ms
@@ -54,7 +58,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
         }
     }
 
-    if (String(topic) == "lights/01") {
+    if (String(topic) == LIGHT_SERVER_TOPIC) {
         digitalWrite(BUZZER_PIN, HIGH);
         delay(100); // Kêu trong 100ms
         digitalWrite(BUZZER_PIN, LOW);
@@ -98,8 +102,8 @@ void handleMQTT() {
             String clientId = "ESP32Client-" + String(random(0xffff), HEX);
             if (client.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
                 Serial.println("connected!");
-                client.subscribe("lights/01"); 
-                 client.subscribe("fans/01"); 
+                client.subscribe(LIGHT_SERVER_TOPIC); 
+                 client.subscribe(FAN_SERVER_TOPIC); 
                 Serial.println("Subscribed to topic: lights/01");
                 Serial.println("Subscribed to topic: fans/01");
             } else {
@@ -118,9 +122,21 @@ String genAlarmMsg(String currentTime, String status) {
     return jsonPayload;
 }
 
-String genAirQualityStatusMsg(String currentTime,float CO2, float CO) { 
-    String jsonPayload =  "{ \"time\": \"" + currentTime + "\", \"co2_ppm\": \"" + CO2 + "\" , \"co_ppm\": \"" + CO + "\"}";
+String genAirQualityStatusMsg(String currentTime,float CO2, float CO, float temp) { 
+    String jsonPayload =  "{ \"time\": \"" + currentTime + "\", \"co2_ppm\": \"" + CO2 + "\" , \"co_ppm\": \"" + CO + "\" , \"temp\": \"" + temp + "\"}";
     return jsonPayload;
+}
+
+void genLightMsg(String status){
+    Serial.println("Generate Fan Msg");
+    String jsonPayload = "{\"status\": \"" + status + "\" }";
+     publishMessage(LIGHT_BUTTON_TOPIC, jsonPayload, true);
+}
+
+void genFanMsg(String status){
+    Serial.println("Generate Fan Msg");
+    String jsonPayload = "{\"type\": \"" + status + "\" }";
+    publishMessage(FAN_BUTTON_TOPIC, jsonPayload, true);
 }
 
 // Hàm publish tin nhắn MQTT
