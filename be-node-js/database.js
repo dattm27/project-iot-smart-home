@@ -1,5 +1,7 @@
+const dotenv = require('dotenv');
+dotenv.config();
 const mongoose = require('mongoose');
-const mongoURI = 'mongodb+srv://SmartHome:s04072000@smarthome.mbgpd.mongodb.net/?retryWrites=true&w=majority&appName=SmartHome';
+const mongoURI = process.env.MONGO_URI;
 
 const connectDB = async () => {
     try {

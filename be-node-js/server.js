@@ -1,4 +1,7 @@
 // Import thư viện express
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const connectDB = require('./database');
 const { DateTime } = require('luxon');
@@ -13,11 +16,15 @@ const ip = '192.168.1.4';
 const brokerUrl = 'mqtts://c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud'; // Static IP
 const phoneIp = 'http://192.168.1.25:8080';
 const caCert = fs.readFileSync('./CERT.txt');
+const hiveMQusername = process.env.HIVEMQ_USERNAME;
+const hiveMQpassword = process.env.HIVEMQ_PASSWORD;
+
+console.log("TK + MK: ", hiveMQusername + " " + hiveMQpassword);
 
 const options = {
     port: 8883,
-    username: 'dattran',
-    password: 'Dattran2',
+    username: hiveMQusername,
+    password: hiveMQpassword,
     clientId: 'nodejs-client',
     clean: true,
     reconnectPeriod: 1000,
