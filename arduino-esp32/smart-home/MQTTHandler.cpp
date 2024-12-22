@@ -115,7 +115,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 }
 
-// Hàm khởi tạo MQTT và kết nối WiFi
+
 void initMQTT(const char* ssid, const char* password) {
     // Kết nối WiFi
     Serial.print("Connecting to WiFi...");
@@ -134,7 +134,7 @@ void initMQTT(const char* ssid, const char* password) {
     client.setCallback(callback);            // Cấu hình callback
 }
 
-// Hàm xử lý vòng lặp MQTT
+
 void handleMQTT() {
     if (!client.connected()) {
         while (!client.connected()) {

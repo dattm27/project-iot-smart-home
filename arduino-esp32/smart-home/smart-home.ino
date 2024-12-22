@@ -18,34 +18,31 @@ const char *mqttStatistic = "MQ135/Statistics";
 #define DHT_PIN 15
 #define BUZZER_PIN 13
 #define DHTTYPE DHT22
-#define BUTTON_PIN 14
-#define BUTTON_2_PIN 18
+#define BUTTON_LED_PIN 14
+#define BUTTON_FAN_PIN 18
 #define LED_1 5
-
-// Fan
 #define INA 25
 #define INB 26
-
-// LIGHT
 #define LIGHT_SENSOR_PIN 33
 
-DHT dht(DHT_PIN, DHTTYPE);
+#define DEBOUNCE_DELAY 200
 
+DHT dht(DHT_PIN, DHTTYPE);
 MQ135 mq135_sensor(PIN_MQ135);
+
 unsigned long lastNotify = 0;
 unsigned long lastAirQualityStatusUpdate = 0;
 String fireAlarmStatus = "inactive";
-
-const char *ssid = "La Thuy";
-const char *password = "hoilamchi";
-// const char *ssid = "THANG_2G";
-// const char *password = "0967240219";
-// const char *ssid = "iPhone của Sơn";
-// const char *password = "20222022";
-const long utcOffsetInSeconds = 7 * 3600; // Hanoi timezone (GMT+7)
-
+unsigned long lastDebounceTime = 0;
+unsigned long lastDebounceTime2 = 0;
 int ledState = HIGH;
-bool fanOn = true;
+
+//const char *ssid = "La Thuy";
+//const char *password = "hoilamchi";
+ const char *ssid = "Đạt’s iPhone";
+ const char *password = "datiphone";
+
+const long utcOffsetInSeconds = 7 * 3600; // Hanoi timezone (GMT+7)
 
 // Initiate UDP -> init timeClient
 WiFiUDP ntpUDP;
@@ -56,83 +53,56 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 void setup()
 {
   Serial.begin(115200);
-  connectWifi();
-
-  initMQTT(ssid, password); // Khởi tạo MQTT
-
+ 
   dht.begin();
   initMQ135(PIN_MQ135);
-
-  // Thiết lập chân buzzer
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW); // Tắt buzzer ban đầu
-  pinMode(LED_1, OUTPUT);
-  digitalWrite(LED_1, ledState); // bật đèn ban đầu
-
-  // Thiết lập quạt
-  //    pinMode(INA, OUTPUT);
-  //    pinMode(INB, OUTPUT);
-  initFan(INA, INB);
-
-  // Bật motor quay thuận
-  digitalWrite(INA, HIGH);
-  digitalWrite(INB, LOW);
-
   pinMode(LIGHT_SENSOR_PIN, INPUT);
+  pinMode(LED_1, OUTPUT);
+  
+  digitalWrite(BUZZER_PIN, LOW); 
+  digitalWrite(LED_1, ledState);
+  initFan(INA, INB); 
+  turnFanOn(); 
+  
+  connectWifi();
+  initMQTT(ssid, password); 
 }
 
 
 void loop()
 {
 
-  handleMQTT(); // Xử lý MQTT
-  // Chống nhảy phím
-  unsigned long lastDebounceTime = 0;
-  const unsigned long debounceDelay = 200;
-  unsigned long lastDebounceTime2 = 0;
-  const unsigned long debounceDelay2 = 200;
+  handleMQTT(); 
+  handleLightSensor();
+  handleDHTSensor();
+  handleLedButtonPressed();
+  handleFanButtonPressed();
+  handleSensorMQ135();
+  updateAirqualityStatus(1000 * 20);
 
-  int buttonState = digitalRead(BUTTON_PIN);
-  if (buttonState == HIGH && (millis() - lastDebounceTime > debounceDelay))
+  delay(200);
+}
+
+void handleLedButtonPressed() {
+  
+  int ledButtonState = digitalRead(BUTTON_LED_PIN);
+  if (debounce(BUTTON_LED_PIN, lastDebounceTime))
   {
     Serial.print("Button pressed");
     lastDebounceTime = millis();
-    // Buzzer kêu
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(100); // Kêu trong 100ms
-    digitalWrite(BUZZER_PIN, LOW);
-
-    // Đổi trạng thái LED
-    ledState = !ledState;          // Toggle trạng thái
-    digitalWrite(LED_1, ledState); // Cập nhật trạng thái LED
-    genLightMsg(ledState == HIGH ? "1" : "0");
+    toggleBuzzer();
+    toggleLight();
   }
+}
 
-  int lightLevel = analogRead(LIGHT_SENSOR_PIN);
-  //     if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 20000) ) {
-  //        Serial.println("Auto light on");
-  //        ledState = !ledState;
-  //        digitalWrite(LED_1, ledState);
-  //        lastDebounceTime = millis();
-  //
-  //     }
-
-  Serial.print("Light level = ");
-  Serial.println(lightLevel); // the raw analog reading
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
-  Serial.print("Temperature:");
-  Serial.println(String(t));
-  Serial.print("Humidity: ");
-  Serial.println(String(h));
-  int buttonState2 = digitalRead(BUTTON_2_PIN);
-  if (buttonState2 == HIGH && (millis() - lastDebounceTime2 > debounceDelay2))
+void handleFanButtonPressed() {
+  
+  int fanButtonState = digitalRead(BUTTON_FAN_PIN);
+  if (debounce(BUTTON_FAN_PIN, lastDebounceTime2))
   {
     lastDebounceTime2 = millis();
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(100); // Kêu trong 100ms
-    digitalWrite(BUZZER_PIN, LOW);
-    // Bật/tắt quạt khi nhấn nút
+    toggleBuzzer();
     if (isFanOn())
     {
       turnFanOff();
@@ -145,56 +115,53 @@ void loop()
     }
   }
 
-  // Điều kiện tự động bật/tắt quạt dựa trên nhiệt độ
-  //    if (!isFanOn() && t > 40 && millis() - lastDebounceTime2 > 20000) {
-  //        turnFanOn();
-  //        genFanMsg("true");
-  //    }
-  //    if (isFanOn() && t < 20 && millis() - lastDebounceTime2 > 20000) {
-  //        turnFanOff();
-  //        genFanMsg("false");
-  //    }
 
-  Serial.print("Gas PPM: ");
-  Serial.println(String(analogRead(PIN_MQ135)));
-
-  FireAlarmCheck();
-  updateAirqualityStatus(1000 * 20);
-
-  delay(200);
 }
+void handleDHTSensor() {
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    Serial.print("Temperature:");
+    Serial.println(String(t));
+    Serial.print("Humidity: ");
+    Serial.println(String(h));
+}
+void handleLightSensor() {
+    int lightLevel = analogRead(LIGHT_SENSOR_PIN);
+   if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 20000) ) {
+      toggleLight();
+      lastDebounceTime = millis();
+
+   }
+
+  Serial.print("Light level = ");
+  Serial.println(lightLevel); 
+}
+
 void connectWifi()
 {
 
   Serial.println("Connecting to WiFi...");
-
   WiFi.begin(ssid, password);
-
-  // Thời gian chờ tối đa: 30 giây
   unsigned long startAttemptTime = millis();
-  const unsigned long wifiTimeout = 30000; // 30 giây
 
-  // Chờ kết nối WiFi
-  while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime) < wifiTimeout)
+  while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime) < 30000) //timeout: 30 seconds
   {
     delay(1000);
     Serial.print(".");
   }
-
-  // Kiểm tra kết quả kết nối
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println("\nConnected to WiFi");
+    toggleBuzzer();
+    toggleBuzzer();
   }
   else
   {
     Serial.println("\nConnect failed");
   }
 
-  // Nếu đã kết nối WiFi, bắt đầu cập nhật thời gian
   if (WiFi.status() == WL_CONNECTED)
   {
-    // Bắt đầu cập nhật thời gian từ NTP
     timeClient.begin();
     timeClient.update();
     Serial.println(getCurrentDateTime());
@@ -202,17 +169,17 @@ void connectWifi()
 }
 
 
-void FireAlarmCheck()
+void handleSensorMQ135()
 {
-
-  if (analogRead(PIN_MQ135) > 2000)
+  int ppm = analogRead(PIN_MQ135);
+  Serial.print("Gas PPM: ");
+  Serial.println(String(ppm));
+  if ( ppm > 2000)
   {
 
     for (int i = 0; i < 10; i++)
     {
-      digitalWrite(BUZZER_PIN, HIGH);
-      delay(100); 
-      digitalWrite(BUZZER_PIN, LOW);
+      toggleBuzzer();
     }
 
     if (fireAlarmStatus.equals("inactive") || !lastNotify)
@@ -247,21 +214,34 @@ void updateAirqualityStatus(long interval)
     String currentDateTime = getCurrentDateTime();
     float t = dht.readTemperature();
     String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, CO2, CO, t);
+    
     publishMessage(mqttStatistic, airQualityUpdateMsg, true);
     lastAirQualityStatusUpdate = millis();
   }
+}
+
+void toggleBuzzer() {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(100);
+    digitalWrite(BUZZER_PIN, LOW);
+}
+
+void toggleLight(){
+    ledState = !ledState;        
+    digitalWrite(LED_1, ledState); 
+    genLightMsg(ledState == HIGH ? "1" : "0");
 }
 
 String getCurrentDateTime()
 {
   timeClient.update();
   unsigned long epochTime = timeClient.getEpochTime();
-
+  
   // Chuyển đổi thành DateTime
   DateTime now(epochTime);
-
+  
   // In thời gian theo định dạng YYYY-MM-DD HH:MM:SS
-  char formattedDateTime[20]; // Chuỗi đủ dài để chứa định dạng
+  char formattedDateTime[20]; 
   snprintf(formattedDateTime, sizeof(formattedDateTime),
            "%04d-%02d-%02d %02d:%02d:%02d",
            now.year(), now.month(), now.day(),
@@ -269,4 +249,13 @@ String getCurrentDateTime()
 
   Serial.println("Thời gian hiện tại:");
   return formattedDateTime;
+}
+
+
+bool debounce(int pin, unsigned long &lastTime) {
+    if (digitalRead(pin) == HIGH && (millis() - lastTime > DEBOUNCE_DELAY)) {
+        lastTime = millis();
+        return true;
+    }
+    return false;
 }
