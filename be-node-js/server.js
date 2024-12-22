@@ -10,25 +10,28 @@ const app = express();
 // Khai báo các hằng
 const port = 4000;
 const ip = '192.168.1.4';
-const brokerUrl = 'mqtt://192.168.1.4'; // Static IP
+const brokerUrl = 'mqtts://c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud'; // Static IP
 const phoneIp = 'http://192.168.1.25:8080';
+const caCert = fs.readFileSync('./CERT.txt');
+
 const options = {
-    port: 1883,
-    //username: 'hivemq.webclient.1732431972503',
-    //password: 'mP<195YJ2VxlDG&s,w$r',
+    port: 8883,
+    username: 'dattran',
+    password: 'Dattran2',
     clientId: 'nodejs-client',
     clean: true,
     reconnectPeriod: 1000,
     connectTimeout: 30 * 1000,
+    ca: caCert,
 };
 
 // Khai báo các topic
 const fireAlarmTopic = 'MQ135/FireAlarm';
 const MQ135StatisticsTopic = 'MQ135/Statistics';
 const LightsControlTopic = 'lights/01/server';
-const LightsResponseTopic = 'lights/01/button'
+const LightsResponseTopic = 'lights/01/button';
 const FansControlTopic = 'fans/01/server';
-const FansResponseTopic = 'fans/01/button'
+const FansResponseTopic = 'fans/01/button';
 const MQ135PeriodTopic = 'MQ135/Period';
 
 
@@ -103,12 +106,27 @@ mqttClient.on('connect', () => {
             console.log('Đã đăng ký thành công topic MQ135/Statistics');
         }
     });
+    mqttClient.subscribe(LightsResponseTopic, (err) => {
+        if (err) {
+            console.error('Không thể đăng ký topic Light button:', err);
+        } else {
+            console.log('Đã đăng ký thành công topic Light button');
+        }
+    });
+    mqttClient.subscribe(FansResponseTopic, (err) => {
+        if (err) {
+            console.error('Không thể đăng ký topic Fan button:', err);
+        } else {
+            console.log('Đã đăng ký thành công topic Fan button');
+        }
+    });
 
 });
 
 // Xử lý khi nhận thông điệp từ MQTT
 mqttClient.on('message', async (topic, message) => {
     const payload = message.toString();
+    //console.log("PAYLOAD NHAN DUOC", payload);
     if (topic === fireAlarmTopic) {
         try {
             if (isValidJson(payload)) {
@@ -181,7 +199,7 @@ mqttClient.on('message', async (topic, message) => {
                     //console.log(`Thông báo MQ135Statistics đã được lưu vào MongoDB với time: ${time}` + ' với nội dung là ' + newMQ135Statistics);
 
                     // bat tat quat khi nhiet do qua nong
-                    console.log("BAT DAU CHUC NANG BAT QUAT THEO NHIET DO")
+                    //console.log("BAT DAU CHUC NANG BAT QUAT THEO NHIET DO")
                     autoTurnOnFans(temp);
 
                 } else {
@@ -192,7 +210,7 @@ mqttClient.on('message', async (topic, message) => {
                 console.error('Thông điệp không phải JSON hợp lệ:', payload);
             }
         } catch (err) {
-            console.error('Lỗi khi xử lý thông điệp:', err);
+            console.error('Lỗi khi xử lý thông điệp của mq135 do các trường thông tin lỗi');
         }
     }
     if (topic === FansResponseTopic) {
@@ -204,17 +222,14 @@ mqttClient.on('message', async (topic, message) => {
                 let fan = await Fan.findOne({ name });
 
                 if (!fan) {
-                    return res.status(404).json({ error: 'Quạt không tồn tại' });
+                    return;
                 }
-
+                console.log("HIEU LENH TYPE: ", type);
                 // Cập nhật trạng thái của đèn
-                fan.status = type === 1 ? 1 : 0;
+                fan.status = type == 1 ? 1 : 0;
+                console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
-                res.status(200).json({
-                    message: type === 1 ? 'Quạt đã bật' : 'Quạt đã tắt',
-                    fanStatus: fan.status
-                });
-                if (type === 1)
+                if (type == 1)
                     console.log('Đã bật quạt thành công');
                 else
                     console.log('Đã tắt quạt thành công');
@@ -223,14 +238,37 @@ mqttClient.on('message', async (topic, message) => {
                 console.error('Thông điệp không phải JSON hợp lệ:', payload);
             }
         }
-        catch (error) {
-            res.status(500).json({ error: 'Lỗi khi cập nhật trạng thái quạt' });
+        catch (err) {
+            console.error('Lỗi khi xử lý thông điệp:', err);
         }
 
     }
     if (topic === LightsResponseTopic) {
+        try {
+            if (isValidJson(payload)) {
+                const { type } = JSON.parse(payload);
+                const name = 'DEN_PH';
+                let light = await Fan.findOne({ name });
 
+                if (!light) {
+                    return;
+                }
 
+                // Cập nhật trạng thái của đèn
+                light.status = type == 1 ? 1 : 0;
+                await light.save();
+                if (type == 1)
+                    console.log('Đã bật đèn thành công');
+                else
+                    console.log('Đã tắt đèn thành công');
+            }
+            else {
+                console.error('Thông điệp không phải JSON hợp lệ:', payload);
+            }
+        }
+        catch (err) {
+            console.error('Lỗi khi xử lý thông điệp:', err);
+        }
     }
 });
 
@@ -368,22 +406,21 @@ app.put('/fans/Timer/', async (req, res) => {
         if (!fan) {
             return res.status(404).json({ error: 'Quạt không tồn tại' });
         }
-
         // Cập nhật chế độ hẹn giờ
-        Fan.timerEnabled = timerEnabled || false;
+        fan.timerEnabled = timerEnabled || false;
 
         // Nếu bật chế độ hẹn giờ, cập nhật thời gian bật và tắt
         if (timerEnabled) {
             if (autoOnTime) {
-                Fan.autoOnTime = new Date(autoOnTime);  // Thời gian bật đèn
+                fan.autoOnTime = new Date(autoOnTime);  // Thời gian bật đèn
             }
             if (autoOffTime) {
-                Fan.autoOffTime = new Date(autoOffTime);  // Thời gian tắt đèn
+                fan.autoOffTime = new Date(autoOffTime);  // Thời gian tắt đèn
             }
         } else {
             // Nếu tắt chế độ hẹn giờ, xóa thời gian bật và tắt
-            Fan.autoOnTime = null;
-            Fan.autoOffTime = null;
+            fan.autoOnTime = null;
+            fan.autoOffTime = null;
         }
 
         // Lưu quạt mới vào cơ sở dữ liệu
@@ -797,7 +834,6 @@ const autoTurnOnFans = async (currentTemperature) => {
     try {
         // Lấy danh sách tất cả các quạt
         const fans = await Fan.find();
-        console.log("OI NONG QUA", currentTemperature);
         if (!fans || fans.length === 0) {
             console.log('Không có quạt nào trong danh sách.');
             return;
@@ -806,10 +842,8 @@ const autoTurnOnFans = async (currentTemperature) => {
         for (const fan of fans) {
             // Chỉ bật quạt nếu nhiệt độ cao hơn ngưỡng và quạt đang tắt
             var autoOnTemperature = fan.autoOnTemperature;
-            console.log("NHIET DO CUA TAO", fan.autoOnTemperature);
             if (currentTemperature >= autoOnTemperature && fan.status === 0) {
                 // Cập nhật trạng thái quạt
-                console.log("BAT QUAT NHE", fan.autoOnTemperature);
                 fan.status = 1;
                 await fan.save();
 
