@@ -20,7 +20,7 @@ void updateRZero() {
 // Hàm khởi tạo MQ135
 void initMQ135(int pin) {
     MQ135_PIN = pin;
-    mq135_sensor = MQ135(pin); // Khởi tạo đối tượng cảm biến
+    mq135_sensor = MQ135(pin); 
     Serial.println("MQ135 initialized on pin: " + String( MQ135_PIN));
     updateRZero();
     
