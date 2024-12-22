@@ -25,7 +25,7 @@ const options = {
     port: 8883,
     username: hiveMQusername,
     password: hiveMQpassword,
-    clientId: 'nodejs',
+    clientId: 'nodes',
     clean: true,
     reconnectPeriod: 1000,
     connectTimeout: 30 * 1000,
@@ -199,7 +199,7 @@ mqttClient.on('message', async (topic, message) => {
                         airQuality: AirQuality,
                         co2_ppm: co2_ppm,
                         co_ppm: co_ppm,
-                        tempe: temp,
+                        temp: temp,
                     });
                     // Lưu thông tin MQ135Statistics vào MongoDB
                     await newMQ135Statistics.save();
