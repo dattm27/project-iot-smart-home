@@ -56,6 +56,9 @@ void setup()
  
   dht.begin();
   initMQ135(PIN_MQ135);
+  connectWifi();
+  initMQTT(ssid, password); 
+  
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LIGHT_SENSOR_PIN, INPUT);
   pinMode(LED_1, OUTPUT);
@@ -65,8 +68,7 @@ void setup()
   initFan(INA, INB); 
   turnFanOn(); 
   
-  connectWifi();
-  initMQTT(ssid, password); 
+  
 }
 
 
