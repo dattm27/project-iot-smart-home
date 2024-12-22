@@ -1,11 +1,11 @@
 // models/Light.js
 const mongoose = require('mongoose');
 
-const lightSchema = new mongoose.Schema({
+const fanSchema = new mongoose.Schema({
     name: {
         type: String,
         required: true,
-        unique: true,  // Tên đèn là duy nhất
+        unique: true,  // Tên quạt là duy nhất
     },
     status: {
         type: Number,
@@ -16,6 +16,15 @@ const lightSchema = new mongoose.Schema({
     room: {
         type: String,
         required: true,  // Cần phải có thông tin phòng
+    },
+    autoOnByTemperature: {
+        type: Boolean,
+        default: false,
+    },
+    autoOnTemperature: {
+        type: Number,
+        required: false,
+        default: 25,
     },
     // Các trường liên quan đến hẹn giờ
     timerEnabled: {
@@ -28,7 +37,6 @@ const lightSchema = new mongoose.Schema({
     autoOffTime: {
         type: Date,  // Thời gian tự động tắt đèn
     },
-    // Trạng thái kiểm soát tự động
     isAutoControlled: {
         type: Boolean,
         default: false,
@@ -36,6 +44,6 @@ const lightSchema = new mongoose.Schema({
 });
 
 // Tạo model từ schema
-const Light = mongoose.model('Light', lightSchema);
+const Fan = mongoose.model('Fan', fanSchema);
 
-module.exports = Light;
+module.exports = Fan;

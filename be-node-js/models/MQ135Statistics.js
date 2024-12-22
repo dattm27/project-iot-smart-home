@@ -5,7 +5,8 @@ const mq135StatisticsSchema = new mongoose.Schema({
     time: { type: String, required: true },       // Thời gian của sự kiện
     airQuality: { type: String, required: true },  // Chất lượng không khí
     co2_ppm: { type: Number, required: true },    // Nồng độ CO2 (ppm)
-    co_ppm: { type: Number, required: true },     // Nồng độ CO (ppm)
+    co_ppm: { type: Number, required: true },
+    temp: { type: Number, required: true },     // Nhiệt độ
     timestamp: { type: Date, default: Date.now }   // Thời gian lưu thông báo, mặc định là thời gian hiện tại
 });
 
