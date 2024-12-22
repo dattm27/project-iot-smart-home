@@ -25,7 +25,7 @@ const options = {
     port: 8883,
     username: hiveMQusername,
     password: hiveMQpassword,
-    clientId: 'nodejs-client',
+    clientId: 'nodejs',
     clean: true,
     reconnectPeriod: 1000,
     connectTimeout: 30 * 1000,
@@ -231,10 +231,10 @@ mqttClient.on('message', async (topic, message) => {
                 if (!fan) {
                     return;
                 }
-                console.log("HIEU LENH TYPE: ", type);
+                // console.log("HIEU LENH TYPE: ", type);
                 // Cập nhật trạng thái của đèn
                 fan.status = type == 1 ? 1 : 0;
-                console.log("I FOUND THIS FAN: ", fan);
+                //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
                 if (type == 1)
                     console.log('Đã bật quạt thành công');
@@ -297,16 +297,12 @@ app.get('/fire-alarm', (req, res) => {
 app.put('/fans/OnOff', async (req, res) => {
     //console.log('BODY', req.body);
     const { type, name } = req.body;
-    console.log("cac");
     if (!name) {
         return res.status(400).json({ error: 'Cần cung cấp tên quạt (name)' });
     }
-    console.log("loz");
-
     if (type !== 1 && type !== 0) {
         return res.status(400).json({ error: 'Tham số "type" phải là 1 (bật) hoặc 0 (tắt)' });
     }
-
     console.log("co tin hieu bat/tat quat", req.body);
     try {
         // Tìm quạt theo name
@@ -335,6 +331,34 @@ app.put('/fans/OnOff', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ error: 'Lỗi khi cập nhật trạng thái quạt' });
+    }
+});
+
+// Xử lí tắt bật chế độ tư động làm mát của quạt
+app.put('/fans/AutoCooling', async (req, res) => {
+    const { name, autoOnByTemperature, autoOnTemperature } = req.body;
+    if (!name) {
+        return res.status(400).json({ error: 'Cần cung cấp tên quạt (name)' });
+    }
+    try {
+        // Tìm quạt theo name
+        let fan = await Fan.findOne({ name });
+
+        if (!fan) {
+            return res.status(404).json({ error: 'Quạt không tồn tại' });
+        }
+
+        // Cập nhật trạng thái của đèn
+        fan.autoOnByTemperature = autoOnByTemperature == true ? true : false;
+        fan.autoOnTemperature = autoOnTemperature;
+        await fan.save();
+
+        res.status(200).json({
+            message: autoOnByTemperature == true ? 'Quạt đã bật chế độ autocooling' : 'Quạt đã tắt chế độ autocooling',
+            fanAutoOnByTemperature: fan.autoOnByTemperature
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Lỗi khi cập nhật trạng thái AutoCooling quạt' });
     }
 });
 
