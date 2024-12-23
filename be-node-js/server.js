@@ -12,8 +12,8 @@ const app = express();
 
 // Khai báo các hằng
 const port = 4000;
-const ip = '192.168.1.4';
-const brokerUrl = 'mqtts://c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud'; // Static IP
+const ip = '172.20.10.7';
+const brokerUrl = 'mqtt://172.20.10.7'; // Static IP
 const phoneIp = 'http://192.168.1.25:8080';
 const caCert = fs.readFileSync('./CERT.txt');
 const hiveMQusername = process.env.HIVEMQ_USERNAME;
@@ -22,14 +22,14 @@ const hiveMQpassword = process.env.HIVEMQ_PASSWORD;
 console.log("TK + MK: ", hiveMQusername + " " + hiveMQpassword);
 
 const options = {
-    port: 8883,
-    username: hiveMQusername,
-    password: hiveMQpassword,
-    clientId: 'nodes',
+    port: 1883,
+    //username: hiveMQusername,
+    //password: hiveMQpassword,
+    clientId: 'node',
     clean: true,
     reconnectPeriod: 1000,
     connectTimeout: 30 * 1000,
-    ca: caCert,
+    //ca: caCert,
 };
 
 // Khai báo các topic
