@@ -224,7 +224,7 @@ mqttClient.on('message', async (topic, message) => {
         // Trả về phản hồi thành công
         try {
             if (isValidJson(payload)) {
-                const { type } = JSON.parse(payload);
+                const { status } = JSON.parse(payload);
                 const name = 'QUAT_1';
                 let fan = await Fan.findOne({ name });
 
@@ -233,10 +233,10 @@ mqttClient.on('message', async (topic, message) => {
                 }
                 // console.log("HIEU LENH TYPE: ", type);
                 // Cập nhật trạng thái của đèn
-                fan.status = type == 1 ? 1 : 0;
+                fan.status = status == 1 ? 1 : 0;
                 //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
-                if (type == 1)
+                if (status == 1)
                     console.log('Đã bật quạt thành công');
                 else
                     console.log('Đã tắt quạt thành công');
@@ -253,18 +253,18 @@ mqttClient.on('message', async (topic, message) => {
     if (topic === LightsResponseTopic) {
         try {
             if (isValidJson(payload)) {
-                const { type } = JSON.parse(payload);
+                const { status } = JSON.parse(payload);
                 const name = 'DEN_PH';
-                let light = await Fan.findOne({ name });
+                let light = await Light.findOne({ name });
 
                 if (!light) {
                     return;
                 }
 
                 // Cập nhật trạng thái của đèn
-                light.status = type == 1 ? 1 : 0;
+                light.status = status == 1 ? 1 : 0;
                 await light.save();
-                if (type == 1)
+                if (status == 1)
                     console.log('Đã bật đèn thành công');
                 else
                     console.log('Đã tắt đèn thành công');
