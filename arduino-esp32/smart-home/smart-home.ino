@@ -52,23 +52,23 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 void setup()
 {
-  Serial.begin(115200);
- 
-  dht.begin();
-  initMQ135(PIN_MQ135);
-  connectWifi();
-  initMQTT(ssid, password); 
-  
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LIGHT_SENSOR_PIN, INPUT);
   pinMode(LED_1, OUTPUT);
   
+  
+  Serial.begin(115200);
   digitalWrite(BUZZER_PIN, LOW); 
   digitalWrite(LED_1, ledState);
+  connectWifi();
+  initMQTT(ssid, password); 
+  dht.begin();
+  initMQ135(PIN_MQ135);
+
+  
   initFan(INA, INB); 
   turnFanOn(); 
-  
-  
+ 
 }
 
 
@@ -155,7 +155,7 @@ void connectWifi()
   {
     Serial.println("\nConnected to WiFi");
     toggleBuzzer();
-    toggleBuzzer();
+   
   }
   else
   {

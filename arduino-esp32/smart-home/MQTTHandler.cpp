@@ -6,14 +6,14 @@
 #define LED_1 5
 #define BUZZER_PIN 13
 // Cấu hình MQTT Broker
-//const char* mqtt_server = "192.168.1.4"; // Không sử dụng "mqtt://"
-//const char* mqtt_username = "dattran";
-//const char* mqtt_password = "Dattran2";
-//const int mqtt_port = 8883; // Mosquitto port mặc định
-const char* mqtt_server = "c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud";
+const char* mqtt_server = "172.20.10.7"; // Không sử dụng "mqtt://"
 const char* mqtt_username = "dattran";
 const char* mqtt_password = "Dattran2";
-const int mqtt_port = 8883;
+const int mqtt_port = 1883; // Mosquitto port mặc định
+//const char* mqtt_server = "c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud";
+//const char* mqtt_username = "dattran";
+//const char* mqtt_password = "Dattran2";
+//const int mqtt_port = 8883;
 const char* LIGHT_SERVER_TOPIC = "lights/01/server";
 const char* FAN_SERVER_TOPIC = "fans/01/server";
 const char* LIGHT_BUTTON_TOPIC = "lights/01/button";
@@ -54,8 +54,8 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 )EOF";
 
 // MQTT client và WiFi client
-//WiFiClient espClient; // Không dùng WiFiClientSecure
-WiFiClientSecure espClient;
+WiFiClient espClient; // Không dùng WiFiClientSecure
+//WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
 // Hàm callback xử lý khi nhận tin nhắn MQTT
@@ -129,7 +129,7 @@ void initMQTT(const char* ssid, const char* password) {
     Serial.println("IP Address: " + WiFi.localIP().toString());
 
     // Cấu hình MQTT
-    espClient.setCACert(root_ca);
+    //espClient.setCACert(root_ca);
     client.setServer(mqtt_server, mqtt_port); // Cấu hình server MQTT
     client.setCallback(callback);            // Cấu hình callback
 }
