@@ -39,8 +39,8 @@ int ledState = HIGH;
 
 //const char *ssid = "La Thuy";
 //const char *password = "hoilamchi";
- const char *ssid = "Đạt’s iPhone";
- const char *password = "datiphone";
+ const char *ssid = "DayAA";
+ const char *password = "66668888";
 
 const long utcOffsetInSeconds = 7 * 3600; // Hanoi timezone (GMT+7)
 
@@ -127,14 +127,19 @@ void handleDHTSensor() {
 }
 void handleLightSensor() {
     int lightLevel = analogRead(LIGHT_SENSOR_PIN);
-   if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 20000) ) {
-      toggleLight();
-      lastDebounceTime = millis();
 
-   }
+    if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 10000)) {
+        toggleLight();
+        lastDebounceTime = millis();
+    }
 
-  Serial.print("Light level = ");
-  Serial.println(lightLevel); 
+    if ((lightLevel > 200) && (ledState == HIGH) && (millis() - lastDebounceTime > 10000)) {
+        toggleLight();
+        lastDebounceTime = millis();
+    }
+
+    Serial.print("Light level = ");
+    Serial.println(lightLevel);
 }
 
 void connectWifi()
@@ -174,7 +179,7 @@ void handleSensorMQ135()
   int ppm = analogRead(PIN_MQ135);
   Serial.print("Gas PPM: ");
   Serial.println(String(ppm));
-  if ( ppm > 2000)
+  if ( ppm > 3800)
   {
 
     toggleBuzzer();
