@@ -10,11 +10,11 @@ static MQ135 mq135_sensor(MQ135_PIN);
 //khởi tạo R0
 void updateRZero() {
    for (int i = 1; i <= 50; i++) {
-        RZero1 += mq135_sensor.getRZero_CO2();
-        RZero2 += mq135_sensor.getRZero_CO();
+        RZero1 += mq135_sensor.getRZero();
+        RZero2 += mq135_sensor.getRZero();
       }
       RZero1 /= 50;
-      RZero2 /= 50; 
+      RZero2 /= 50;
 }
 
 // Hàm khởi tạo MQ135
@@ -28,14 +28,14 @@ void initMQ135(int pin) {
 
 // Hàm đọc giá trị CO2 từ cảm biến
 float readCO2() {
-    float co2 =  mq135_sensor.getPPM_CO2(RZero1); // Đọc nồng độ CO2
+    float co2 =  mq135_sensor.getPPM();
     Serial.println("CO2 Concentration: " + String(co2) + " ppm");
     return co2;
 }
 
 // Hàm đọc nồng độ khí theo đơn vị PPM
 float readPPM() {
-    float ppm =  mq135_sensor.getPPM_CO(RZero2); // Lấy chỉ số RZero
+    float ppm =  mq135_sensor.getPPM();
     Serial.println("Gas Concentration (PPM): " + String(ppm));
     return ppm;
 }

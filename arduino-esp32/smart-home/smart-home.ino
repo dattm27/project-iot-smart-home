@@ -66,20 +66,20 @@ void setup()
   turnFanOn(); 
   
   connectWifi();
-  initMQTT(ssid, password); 
+  // initMQTT(ssid, password);
 }
 
 
 void loop()
 {
 
-  handleMQTT(); 
+  // handleMQTT();
   handleLightSensor();
   handleDHTSensor();
   handleLedButtonPressed();
   handleFanButtonPressed();
   handleSensorMQ135();
-  updateAirqualityStatus(1000 * 20);
+  // updateAirqualityStatus(1000 * 20);
 
   delay(200);
 }
@@ -177,17 +177,14 @@ void handleSensorMQ135()
   if ( ppm > 2000)
   {
 
-    for (int i = 0; i < 10; i++)
-    {
-      toggleBuzzer();
-    }
+    toggleBuzzer();
 
     if (fireAlarmStatus.equals("inactive") || !lastNotify)
     {
       fireAlarmStatus = "active";
-      String currentDateTime = getCurrentDateTime();
-      String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
-      publishMessage(sensor1_topic, alarmMsg, true);
+      // String currentDateTime = getCurrentDateTime();
+      // String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
+      // publishMessage(sensor1_topic, alarmMsg, true);
       lastNotify = millis();
     }
   }
@@ -196,9 +193,9 @@ void handleSensorMQ135()
     if (millis() - lastNotify > 1000 * 60)
     {
       fireAlarmStatus = "inactive";
-      String currentDateTime = getCurrentDateTime();
-      String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
-      publishMessage(sensor1_topic, alarmMsg, true);
+      // String currentDateTime = getCurrentDateTime();
+      // String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
+      // publishMessage(sensor1_topic, alarmMsg, true);
       lastNotify = millis();
     }
   }
