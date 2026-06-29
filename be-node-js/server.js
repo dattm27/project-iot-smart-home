@@ -6,40 +6,68 @@ const express = require('express');
 const connectDB = require('./database');
 const { DateTime } = require('luxon');
 const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const mqtt = require('mqtt');
+const authenticateToken = require('./middleware/authenticateToken');
+const { comparePassword, generateToken, hashPassword } = require('./auth');
 const app = express();
+const requiredEnv = (name) => {
+    if (!process.env[name]) {
+        throw new Error(`${name} is required`);
+    }
+    return process.env[name];
+};
+const log = (scope, message, data = {}) => {
+    const details = Object.entries(data)
+        .filter(([, value]) => value !== undefined && value !== null)
+        .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`)
+        .join(' ');
+
+    console.log(`[${scope}] ${message}${details ? ` | ${details}` : ''}`);
+};
+const logError = (scope, message, error) => {
+    console.error(`[${scope}] ${message}`, error?.message || error || '');
+};
+const actionText = (type) => (Number(type) === 1 ? 'ON' : 'OFF');
 
 // Khai báo các hằng
-const port = 4000;
-const ip = '192.168.1.4';
-const brokerUrl = 'mqtts://c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud'; // Static IP
-const phoneIp = 'http://192.168.1.25:8080';
-const caCert = fs.readFileSync('./CERT.txt');
-const hiveMQusername = process.env.HIVEMQ_USERNAME;
-const hiveMQpassword = process.env.HIVEMQ_PASSWORD;
-
-console.log("TK + MK: ", hiveMQusername + " " + hiveMQpassword);
+const port = Number(requiredEnv('PORT'));
+const ip = requiredEnv('SERVER_IP');
+const brokerUrl = requiredEnv('MQTT_BROKER_URL');
+const phoneIp = requiredEnv('PHONE_IP');
+const caCertPath = requiredEnv('MQTT_CA_CERT_PATH');
+const caCert = process.env.NODE_ENV === 'test' ? undefined : fs.readFileSync(path.resolve(__dirname, caCertPath));
+const hiveMQusername = requiredEnv('HIVEMQ_USERNAME');
+const hiveMQpassword = requiredEnv('HIVEMQ_PASSWORD');
+log('CONFIG', 'Loaded MQTT config', { brokerUrl, port: process.env.MQTT_PORT, clientId: process.env.MQTT_CLIENT_ID });
 
 const options = {
-    port: 8883,
+    port: Number(requiredEnv('MQTT_PORT')),
     username: hiveMQusername,
     password: hiveMQpassword,
-    clientId: 'nodes',
-    clean: true,
-    reconnectPeriod: 1000,
-    connectTimeout: 30 * 1000,
+    clientId: requiredEnv('MQTT_CLIENT_ID'),
+    clean: requiredEnv('MQTT_CLEAN') === 'true',
+    reconnectPeriod: Number(requiredEnv('MQTT_RECONNECT_PERIOD_MS')),
+    connectTimeout: Number(requiredEnv('MQTT_CONNECT_TIMEOUT_MS')),
     ca: caCert,
 };
 
 // Khai báo các topic
-const fireAlarmTopic = 'MQ135/FireAlarm';
-const MQ135StatisticsTopic = 'MQ135/Statistics';
-const LightsControlTopic = 'lights/01/server';
-const LightsResponseTopic = 'lights/01/button';
-const FansControlTopic = 'fans/01/server';
-const FansResponseTopic = 'fans/01/button';
-const MQ135PeriodTopic = 'MQ135/Period';
+const fireAlarmTopic = requiredEnv('MQTT_FIRE_ALARM_TOPIC');
+const MQ135StatisticsTopic = requiredEnv('MQTT_MQ135_STATISTICS_TOPIC');
+const LightsControlTopic = requiredEnv('MQTT_LIGHTS_CONTROL_TOPIC');
+const LightsResponseTopic = requiredEnv('MQTT_LIGHTS_RESPONSE_TOPIC');
+const FansControlTopic = requiredEnv('MQTT_FANS_CONTROL_TOPIC');
+const FansResponseTopic = requiredEnv('MQTT_FANS_RESPONSE_TOPIC');
+const MQ135PeriodTopic = requiredEnv('MQTT_MQ135_PERIOD_TOPIC');
+const defaultFanName = requiredEnv('DEFAULT_FAN_NAME');
+const defaultLightName = requiredEnv('DEFAULT_LIGHT_NAME');
+const timezone = requiredEnv('TIMEZONE');
+const autoCheckIntervalMs = Number(requiredEnv('AUTO_CHECK_INTERVAL_MS'));
+const autoFanOnBadAir = requiredEnv('AUTO_FAN_ON_BAD_AIR') === 'true';
+const autoFanCoThreshold = Number(requiredEnv('AUTO_FAN_CO_THRESHOLD'));
+const autoFanCo2Threshold = Number(requiredEnv('AUTO_FAN_CO2_THRESHOLD'));
 
 
 // Khai báo các model
@@ -47,12 +75,15 @@ const FireAlarm = require('./models/FireAlarm');  // Import model FireAlarm từ
 const MQ135Statistics = require('./models/MQ135Statistics');
 const Light = require('./models/Light');
 const Fan = require('./models/Fan');
+const User = require('./models/User');
 
 //Khai báo các biến toàn cục
 let isFire = false;
 
 // Kết nối với database
-connectDB();
+if (process.env.NODE_ENV !== 'test') {
+    connectDB();
+}
 
 // Kiểm tra đầu vào có là 1 json không
 function isValidJson(str) {
@@ -90,41 +121,47 @@ function evaluateAirQuality(co2, co) {
     }
 }
 
+const createTestMqttClient = () => ({
+    on: () => {},
+    subscribe: (_topic, callback) => callback && callback(),
+    publish: (_topic, _message, _options, callback) => callback && callback(),
+});
+
 // Kết nối với mqtt
-const mqttClient = mqtt.connect(brokerUrl, options);
+const mqttClient = process.env.NODE_ENV === 'test' ? createTestMqttClient() : mqtt.connect(brokerUrl, options);
 
 // Kiểm tra kết nối MQTT
 mqttClient.on('connect', () => {
-    console.log('Đã kết nối với MQTT broker.');
+    log('MQTT', 'Connected to broker', { brokerUrl });
 
     // Lắng nghe sự kiện FireAlarm từ topic MQ135/FireAlarm
     mqttClient.subscribe(fireAlarmTopic, (err) => {
         if (err) {
-            console.error('Không thể đăng ký topic FireAlarm:', err);
+            logError('MQTT', `Subscribe failed topic=${fireAlarmTopic}`, err);
         } else {
-            console.log('Đã đăng ký thành công topic MQ135/FireAlarm');
+            log('MQTT', 'Subscribed', { topic: fireAlarmTopic });
         }
     });
     // Lắng nghe sự kiện FireAlarm từ topic MQ135/Statistics
     mqttClient.subscribe(MQ135StatisticsTopic, (err) => {
         if (err) {
-            console.error('Không thể đăng ký topic Statistics:', err);
+            logError('MQTT', `Subscribe failed topic=${MQ135StatisticsTopic}`, err);
         } else {
-            console.log('Đã đăng ký thành công topic MQ135/Statistics');
+            log('MQTT', 'Subscribed', { topic: MQ135StatisticsTopic });
         }
     });
     mqttClient.subscribe(LightsResponseTopic, (err) => {
         if (err) {
-            console.error('Không thể đăng ký topic Light button:', err);
+            logError('MQTT', `Subscribe failed topic=${LightsResponseTopic}`, err);
         } else {
-            console.log('Đã đăng ký thành công topic Light button');
+            log('MQTT', 'Subscribed', { topic: LightsResponseTopic });
         }
     });
     mqttClient.subscribe(FansResponseTopic, (err) => {
         if (err) {
-            console.error('Không thể đăng ký topic Fan button:', err);
+            logError('MQTT', `Subscribe failed topic=${FansResponseTopic}`, err);
         } else {
-            console.log('Đã đăng ký thành công topic Fan button');
+            log('MQTT', 'Subscribed', { topic: FansResponseTopic });
         }
     });
 
@@ -138,6 +175,7 @@ mqttClient.on('message', async (topic, message) => {
         try {
             if (isValidJson(payload)) {
                 const { time, status } = JSON.parse(payload);
+                log('MQTT][FIRE', 'Received fire alarm event', { status, time, topic });
 
                 // Kiểm tra nếu tham số time và status hợp lệ
                 if (time && status) {
@@ -152,11 +190,11 @@ mqttClient.on('message', async (topic, message) => {
                     if (latestFireAlarm) {
                         // So sánh status của bản ghi gần nhất với status mới
                         if (latestFireAlarm.status === status) {
-                            console.log('Trạng thái hiện tại trùng với trạng thái gần nhất, không thực hiện thay đổi.');
+                            log('DB][FIRE', 'Skipped duplicate fire alarm status', { status });
                             return;
                         }
                         else {
-                            console.log('Trạng thái mới khác với trạng thái hiện tại, cập nhật trạng thái và thời gian.');
+                            log('DB][FIRE', 'Updated latest fire alarm status', { from: latestFireAlarm.status, to: status, time });
                             // Cập nhật trạng thái và thời gian
                             latestFireAlarm.status = status;
                             latestFireAlarm.time = time;
@@ -172,15 +210,15 @@ mqttClient.on('message', async (topic, message) => {
                         // Lưu vào MongoDB
                         await newFireAlarm.save();
                     }
-                    console.log(`Thông báo cháy đã được lưu vào MongoDB với time: ${time} và status: ${status}`);
+                    log('DB][FIRE', 'Saved fire alarm event', { status, time, isFire });
                 } else {
-                    console.error('Thông điệp không hợp lệ. Thiếu time hoặc status.');
+                    logError('MQTT][FIRE', 'Invalid payload, missing time or status', payload);
                 }
             } else {
-                console.error('Thông điệp không phải JSON hợp lệ:', payload);
+                logError('MQTT][FIRE', 'Payload is not valid JSON', payload);
             }
         } catch (err) {
-            console.error('Lỗi khi xử lý thông điệp:', err);
+            logError('MQTT][FIRE', 'Failed to handle message', err);
         }
     }
     if (topic === MQ135StatisticsTopic) {
@@ -189,9 +227,10 @@ mqttClient.on('message', async (topic, message) => {
 
                 // Giả sử payload là một chuỗi JSON có dạng { "time": "2024-11-24T12:00:00Z", "status": "active" }
                 const { time, co2_ppm, co_ppm, temp } = JSON.parse(payload);
+                log('MQTT][SENSOR', 'Received MQ135 statistics', { temp, co2_ppm, co_ppm, topic });
 
                 // Kiểm tra nếu tham số time và status hợp lệ
-                if (time && co2_ppm !== undefined && co_ppm && temp !== undefined) {
+                if (time && co2_ppm !== undefined && co_ppm !== undefined && temp !== undefined) {
                     // Tạo mới một MQ135Statistics từ các tham số nhận được
                     const AirQuality = evaluateAirQuality(co2_ppm, co_ppm);
                     const newMQ135Statistics = new MQ135Statistics({
@@ -203,88 +242,158 @@ mqttClient.on('message', async (topic, message) => {
                     });
                     // Lưu thông tin MQ135Statistics vào MongoDB
                     await newMQ135Statistics.save();
+                    log('DB][SENSOR', 'Saved MQ135 statistics', { temp, co2_ppm, co_ppm, airQuality: AirQuality });
                     //console.log(`Thông báo MQ135Statistics đã được lưu vào MongoDB với time: ${time}` + ' với nội dung là ' + newMQ135Statistics);
 
                     // bat tat quat khi nhiet do qua nong
                     //console.log("BAT DAU CHUC NANG BAT QUAT THEO NHIET DO")
-                    autoTurnOnFans(temp);
+                    autoTurnOnFans(temp, AirQuality, co_ppm, co2_ppm);
 
                 } else {
-                    console.error('Thông điệp không hợp lệ. Thiếu thông tin cần thiết.');
+                    logError('MQTT][SENSOR', 'Invalid payload, missing required fields', payload);
                 }
             }
             else {
-                console.error('Thông điệp không phải JSON hợp lệ:', payload);
+                logError('MQTT][SENSOR', 'Payload is not valid JSON', payload);
             }
         } catch (err) {
-            console.error('Lỗi khi xử lý thông điệp của mq135 do các trường thông tin lỗi');
+            logError('MQTT][SENSOR', 'Failed to handle MQ135 message', err);
         }
     }
     if (topic === FansResponseTopic) {
         // Trả về phản hồi thành công
         try {
             if (isValidJson(payload)) {
-                const { type } = JSON.parse(payload);
-                const name = 'QUAT_1';
+                const { type, name: payloadName } = JSON.parse(payload);
+                const name = payloadName || defaultFanName;
+                log('MQTT][FAN', 'Received device response', { name, action: actionText(type), topic });
                 let fan = await Fan.findOne({ name });
 
                 if (!fan) {
+                    log('MQTT][FAN', 'Ignored response because fan was not found', { name });
                     return;
                 }
                 // console.log("HIEU LENH TYPE: ", type);
                 // Cập nhật trạng thái của đèn
                 fan.status = type == 1 ? 1 : 0;
+                fan.isAutoControlled = type == 0;
                 //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
-                if (type == 1)
-                    console.log('Đã bật quạt thành công');
-                else
-                    console.log('Đã tắt quạt thành công');
+                log('DB][FAN', 'Synced fan status from device response', { name, status: fan.status, source: topic });
             }
             else {
-                console.error('Thông điệp không phải JSON hợp lệ:', payload);
+                logError('MQTT][FAN', 'Payload is not valid JSON', payload);
             }
         }
         catch (err) {
-            console.error('Lỗi khi xử lý thông điệp:', err);
+            logError('MQTT][FAN', 'Failed to handle device response', err);
         }
 
     }
     if (topic === LightsResponseTopic) {
         try {
             if (isValidJson(payload)) {
-                const { type } = JSON.parse(payload);
-                const name = 'DEN_PH';
-                let light = await Fan.findOne({ name });
+                const { type, name: payloadName } = JSON.parse(payload);
+                const name = payloadName || defaultLightName;
+                log('MQTT][LIGHT', 'Received device response', { name, action: actionText(type), topic });
+                let light = await Light.findOne({ name });
 
                 if (!light) {
+                    log('MQTT][LIGHT', 'Ignored response because light was not found', { name });
                     return;
                 }
 
                 // Cập nhật trạng thái của đèn
                 light.status = type == 1 ? 1 : 0;
+                light.isAutoControlled = type == 0;
                 await light.save();
-                if (type == 1)
-                    console.log('Đã bật đèn thành công');
-                else
-                    console.log('Đã tắt đèn thành công');
+                log('DB][LIGHT', 'Synced light status from device response', { name, status: light.status, source: topic });
             }
             else {
-                console.error('Thông điệp không phải JSON hợp lệ:', payload);
+                logError('MQTT][LIGHT', 'Payload is not valid JSON', payload);
             }
         }
         catch (err) {
-            console.error('Lỗi khi xử lý thông điệp:', err);
+            logError('MQTT][LIGHT', 'Failed to handle device response', err);
         }
     }
 });
 
 // Khi xảy ra lỗi với MQTT
 mqttClient.on('error', (err) => {
-    console.error('Lỗi kết nối MQTT:', err);
+    logError('MQTT', 'Connection error', err);
 });
 
 app.use(express.json());
+
+app.post('/auth/register', async (req, res) => {
+    const { username, email, password } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Cần cung cấp username và password' });
+    }
+
+    if (password.length < 6) {
+        return res.status(400).json({ error: 'Password phải có ít nhất 6 ký tự' });
+    }
+
+    try {
+        const existingUser = await User.findOne({ username });
+        if (existingUser) {
+            return res.status(400).json({ error: 'Username này đã tồn tại' });
+        }
+
+        const user = new User({
+            username,
+            email,
+            passwordHash: hashPassword(password),
+        });
+        await user.save();
+
+        const token = generateToken(user);
+        return res.status(201).json({
+            message: 'Đăng ký thành công',
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({ error: 'Lỗi khi đăng ký tài khoản' });
+    }
+});
+
+app.post('/auth/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Cần cung cấp username và password' });
+    }
+
+    try {
+        const user = await User.findOne({ username });
+        if (!user || !comparePassword(password, user.passwordHash)) {
+            return res.status(401).json({ error: 'Username hoặc password không đúng' });
+        }
+
+        const token = generateToken(user);
+        return res.status(200).json({
+            message: 'Đăng nhập thành công',
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({ error: 'Lỗi khi đăng nhập' });
+    }
+});
+
+app.use(authenticateToken);
 
 // Xử lí báo cháy
 app.get('/fire-alarm', (req, res) => {
@@ -303,7 +412,7 @@ app.put('/fans/OnOff', async (req, res) => {
     if (type !== 1 && type !== 0) {
         return res.status(400).json({ error: 'Tham số "type" phải là 1 (bật) hoặc 0 (tắt)' });
     }
-    console.log("co tin hieu bat/tat quat", req.body);
+    log('HTTP][FAN', 'Received manual command', { name, action: actionText(type) });
     try {
         // Tìm quạt theo name
         let fan = await Fan.findOne({ name });
@@ -314,16 +423,19 @@ app.put('/fans/OnOff', async (req, res) => {
 
         // Cập nhật trạng thái của đèn
         fan.status = type === 1 ? 1 : 0;
+        fan.isAutoControlled = type === 0;
         await fan.save();
+        log('DB][FAN', 'Updated fan status from HTTP command', { name, status: fan.status, isAutoControlled: fan.isAutoControlled });
 
         const message = JSON.stringify({ type });
 
         // Gửi tin nhắn vào Mosquitto broker tại topic /lights/01
         mqttClient.publish(FansControlTopic, message, { qos: 0 }, (err) => {
             if (err) {
-                console.error('Error publishing to MQTT broker:', err);
+                logError('MQTT][FAN', `Publish failed topic=${FansControlTopic}`, err);
                 return res.status(500).json({ error: 'Không thể gửi tin nhắn đến Mosquitto broker' });
             }
+            log('MQTT][FAN', 'Published command', { topic: FansControlTopic, name, action: actionText(type), payload: message });
         });
         res.status(200).json({
             message: type === 1 ? 'Quạt đã bật' : 'Quạt đã tắt',
@@ -417,7 +529,7 @@ app.get('/fans/', async (req, res) => {
             fans,
         });
     } catch (error) {
-        console.error('Error fetching fans:', error);
+        logError('HTTP][FAN', 'Failed to fetch fans', error);
         res.status(500).json({ error: 'Lỗi khi lấy danh sách quạt' });
     }
 });
@@ -493,7 +605,7 @@ app.delete('/fans/', async (req, res) => {
             fan,
         });
     } catch (error) {
-        console.error('Error deleting fan by name:', error);
+        logError('HTTP][FAN', 'Failed to delete fan', error);
         res.status(500).json({ error: 'Lỗi khi xóa quạt' });
     }
 });
@@ -513,7 +625,7 @@ app.put('/lights/OnOff', async (req, res) => {
     if (type !== 1 && type !== 0) {
         return res.status(400).json({ error: 'Tham số "type" phải là 1 (bật) hoặc 0 (tắt)' });
     }
-    console.log("co tin hieu bat/tat den", req.body);
+    log('HTTP][LIGHT', 'Received manual command', { name, action: actionText(type) });
     try {
         // Tìm đèn theo name
         let light = await Light.findOne({ name });
@@ -524,16 +636,19 @@ app.put('/lights/OnOff', async (req, res) => {
 
         // Cập nhật trạng thái của đèn
         light.status = type === 1 ? 1 : 0;
+        light.isAutoControlled = type === 0;
         await light.save();
+        log('DB][LIGHT', 'Updated light status from HTTP command', { name, status: light.status, isAutoControlled: light.isAutoControlled });
 
         const message = JSON.stringify({ type });
 
         // Gửi tin nhắn vào Mosquitto broker tại topic /lights/01
         mqttClient.publish(LightsControlTopic, message, { qos: 0 }, (err) => {
             if (err) {
-                console.error('Error publishing to MQTT broker:', err);
+                logError('MQTT][LIGHT', `Publish failed topic=${LightsControlTopic}`, err);
                 return res.status(500).json({ error: 'Không thể gửi tin nhắn đến Mosquitto broker' });
             }
+            log('MQTT][LIGHT', 'Published command', { topic: LightsControlTopic, name, action: actionText(type), payload: message });
             // Trả về phản hồi thành công
             res.status(200).json({
                 message: type === 1 ? 'Đèn đã bật' : 'Đèn đã tắt',
@@ -649,7 +764,7 @@ app.get('/lights/', async (req, res) => {
             lights,
         });
     } catch (error) {
-        console.error('Error fetching lights:', error);
+        logError('HTTP][LIGHT', 'Failed to fetch lights', error);
         res.status(500).json({ error: 'Lỗi khi lấy danh sách đèn' });
     }
 });
@@ -678,7 +793,7 @@ app.delete('/lights/', async (req, res) => {
             light,
         });
     } catch (error) {
-        console.error('Error deleting light by name:', error);
+        logError('HTTP][LIGHT', 'Failed to delete light', error);
         res.status(500).json({ error: 'Lỗi khi xóa đèn' });
     }
 });
@@ -694,7 +809,7 @@ app.delete('/fire-alarms', async (req, res) => {
             deletedCount: result.deletedCount, // Số tài liệu đã xóa
         });
     } catch (error) {
-        console.error('Lỗi khi xóa thông báo báo cháy:', error);
+        logError('HTTP][FIRE', 'Failed to delete fire alarms', error);
         res.status(500).json({ error: 'Lỗi khi xóa tất cả thông báo báo cháy' });
     }
 });
@@ -724,7 +839,7 @@ const checkAutoFans = async () => {
         const fans = await Fan.find({ timerEnabled: true });
 
         fans.forEach(async (fan) => {
-            const currentTime = DateTime.now().setZone('Asia/Ho_Chi_Minh');
+            const currentTime = DateTime.now().setZone(timezone);
             //console.log("THOI GIAN HIEN TAI: ", currentTime);
             const currentHour = currentTime.hour;
             const currentMinute = currentTime.minute;
@@ -762,7 +877,7 @@ const checkAutoFans = async () => {
                     // Gửi thông điệp MQTT để bật quạt
                     const message = JSON.stringify({ type: 1 });
                     mqttClient.publish(FansControlTopic, message, { qos: 1 });
-                    console.log(`Quạt ${fan.name} đã bật tự động.`);
+                    log('AUTO][FAN', 'Turned fan on by timer', { name: fan.name, topic: FansControlTopic, payload: message });
                 }
             }
             // Nếu hiện tại không nằm trong khoảng thời gian bật
@@ -780,12 +895,12 @@ const checkAutoFans = async () => {
                     // Gửi thông điệp MQTT để tắt đèn
                     const message = JSON.stringify({ type: 0 });
                     mqttClient.publish(FansControlTopic, message, { qos: 1 });
-                    console.log(`Quạt ${fan.name} đã tắt tự động.`);
+                    log('AUTO][FAN', 'Turned fan off by timer', { name: fan.name, topic: FansControlTopic, payload: message });
                 }
             }
         });
     } catch (err) {
-        console.error('Lỗi khi kiểm tra và tự động bật/tắt quạt:', err);
+        logError('AUTO][FAN', 'Failed while checking fan timer', err);
     }
 };
 
@@ -796,7 +911,7 @@ const checkAutoLights = async () => {
         const lights = await Light.find({ timerEnabled: true });
 
         lights.forEach(async (light) => {
-            const currentTime = DateTime.now().setZone('Asia/Ho_Chi_Minh');
+            const currentTime = DateTime.now().setZone(timezone);
             //console.log("THOI GIAN HIEN TAI: ", currentTime);
             const currentHour = currentTime.hour;
             const currentMinute = currentTime.minute;
@@ -834,7 +949,7 @@ const checkAutoLights = async () => {
                     // Gửi thông điệp MQTT để bật đèn
                     const message = JSON.stringify({ type: 1 });
                     mqttClient.publish(LightsControlTopic, message, { qos: 1 });
-                    console.log(`Đèn ${light.name} đã bật tự động.`);
+                    log('AUTO][LIGHT', 'Turned light on by timer', { name: light.name, topic: LightsControlTopic, payload: message });
                 }
             }
             // Nếu hiện tại không nằm trong khoảng thời gian bật
@@ -852,30 +967,42 @@ const checkAutoLights = async () => {
                     // Gửi thông điệp MQTT để tắt đèn
                     const message = JSON.stringify({ type: 0 });
                     mqttClient.publish(LightsControlTopic, message, { qos: 1 });
-                    console.log(`Đèn ${light.name} đã tắt tự động.`);
+                    log('AUTO][LIGHT', 'Turned light off by timer', { name: light.name, topic: LightsControlTopic, payload: message });
                 }
             }
         });
     } catch (err) {
-        console.error('Lỗi khi kiểm tra và tự động bật/tắt đèn:', err);
+        logError('AUTO][LIGHT', 'Failed while checking light timer', err);
     }
 };
 
-const autoTurnOnFans = async (currentTemperature) => {
+const autoTurnOnFans = async (currentTemperature, airQuality, coPpm, co2Ppm) => {
     try {
         // Lấy danh sách tất cả các quạt
         const fans = await Fan.find();
         if (!fans || fans.length === 0) {
-            console.log('Không có quạt nào trong danh sách.');
+            log('AUTO][FAN', 'Skipped auto cooling because no fans exist');
             return;
         }
+        const isBadAir = autoFanOnBadAir && (
+            airQuality === 'BAD'
+            || Number(coPpm) >= autoFanCoThreshold
+            || Number(co2Ppm) >= autoFanCo2Threshold
+        );
+
         // Duyệt qua tất cả các quạt
         for (const fan of fans) {
-            // Chỉ bật quạt nếu nhiệt độ cao hơn ngưỡng và quạt đang tắt
-            var autoOnTemperature = fan.autoOnTemperature;
-            if (currentTemperature >= autoOnTemperature && fan.status === 0) {
+            const autoOnTemperature = fan.autoOnTemperature;
+            const shouldTurnOnByTemperature = fan.autoOnByTemperature === true
+                && Number(currentTemperature) >= Number(autoOnTemperature);
+            const shouldTurnOn = shouldTurnOnByTemperature || isBadAir;
+            const reason = shouldTurnOnByTemperature ? 'temperature' : (isBadAir ? 'air_quality' : 'none');
+
+            // Chỉ bật quạt nếu nhiệt độ cao hơn ngưỡng hoặc chất lượng không khí xấu
+            if (shouldTurnOn && fan.status === 0) {
                 // Cập nhật trạng thái quạt
                 fan.status = 1;
+                fan.isAutoControlled = true;
                 await fan.save();
 
                 // Tạo thông điệp bật quạt
@@ -884,22 +1011,44 @@ const autoTurnOnFans = async (currentTemperature) => {
                 // Gửi tín hiệu tới MQTT broker
                 mqttClient.publish(FansControlTopic, message, { qos: 0 }, (err) => {
                     if (err) {
-                        console.error(`Lỗi khi gửi tín hiệu tới quạt ${fan.name}:`, err);
+                        logError('MQTT][FAN', `Publish failed topic=${FansControlTopic}`, err);
                     } else {
-                        console.log(`Đã bật quạt ${fan.name}`);
+                        log('AUTO][FAN', 'Turned fan on from sensor data', {
+                            name: fan.name,
+                            reason,
+                            temp: currentTemperature,
+                            threshold: autoOnTemperature,
+                            airQuality,
+                            coPpm,
+                            co2Ppm,
+                            topic: FansControlTopic,
+                            payload: message,
+                        });
                     }
                 });
             }
         }
     } catch (error) {
-        console.error('Lỗi trong quá trình điều khiển quạt:', error);
+        logError('AUTO][FAN', 'Failed while controlling fan from sensor data', error);
     }
 };
 
 // Thiết lập một chu kỳ để kiểm tra mỗi phút (60000ms)
-setInterval(checkAutoLights, 30000);
-setInterval(checkAutoFans, 30000);
+if (process.env.NODE_ENV !== 'test') {
+    setInterval(checkAutoLights, autoCheckIntervalMs);
+    setInterval(checkAutoFans, autoCheckIntervalMs);
+}
 
-app.listen(port, () => {
-    console.log(`Server đang chạy tại http://${ip}:${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        log('SERVER', 'Started', { url: `http://${ip}:${port}` });
+    });
+}
+
+module.exports = {
+    app,
+    autoTurnOnFans,
+    checkAutoFans,
+    checkAutoLights,
+    evaluateAirQuality,
+};
