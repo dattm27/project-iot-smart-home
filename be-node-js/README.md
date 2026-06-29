@@ -28,7 +28,7 @@ Sau đó sửa các biến trong `.env`:
 
 ```env
 MONGO_URI=mongodb+srv://<username>:<password>@<cluster-host>/?retryWrites=true&w=majority&appName=<app-name>
-HIVEMQ_USERNAME=<hivemq-username>
+HIVEMQ_USERNAME=be-server
 HIVEMQ_PASSWORD=<hivemq-password>
 JWT_SECRET=<strong-random-secret>
 MQTT_BROKER_URL=mqtts://<cluster-id>.s1.eu.hivemq.cloud
@@ -36,6 +36,20 @@ MQTT_PORT=8883
 ```
 
 Không commit file `.env`. Repo chỉ commit `.env.example`.
+
+## HiveMQ ACL
+
+Backend dùng credential `be-server`. Credential này cần permission `PUBLISH_SUBSCRIBE` với topic filter `#` vì backend phải vừa subscribe dữ liệu cảm biến/phản hồi thiết bị, vừa publish lệnh điều khiển.
+
+Các credential gợi ý cho thiết bị:
+
+| Username | Permission | Topic filter | Mục đích |
+| --- | --- | --- | --- |
+| `be-server` | `PUBLISH_SUBSCRIBE` | `#` | Backend |
+| `mq135-sensor` | `PUBLISH_SUBSCRIBE` | `MQ135/#` | Cảm biến MQ135 |
+| `light-01` | `PUBLISH_SUBSCRIBE` | `lights/01/#` | Thiết bị đèn |
+| `fan-01` | `PUBLISH_SUBSCRIBE` | `fans/01/#` | Thiết bị quạt |
+| `mqtt-test` | `PUBLISH_SUBSCRIBE` | `#` | Test thủ công, xong nên xóa/disable |
 
 ## Chạy backend
 
