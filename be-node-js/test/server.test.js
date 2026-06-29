@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { after, before, describe, it } = require('node:test');
 
-const { app, autoTurnOnFans } = require('../server');
+const { app, autoTurnOnFans, evaluateAirQuality } = require('../server');
 const { generateToken, hashPassword } = require('../auth');
 const Fan = require('../models/Fan');
 const Light = require('../models/Light');
@@ -14,7 +14,7 @@ const User = require('../models/User');
 let server;
 let baseUrl;
 
-const request = async (method, pathname, body, token) => {
+const request = async (method, pathname, body, token, options = {}) => {
     const payload = body ? JSON.stringify(body) : undefined;
 
     return new Promise((resolve, reject) => {
@@ -32,7 +32,8 @@ const request = async (method, pathname, body, token) => {
             res.on('end', () => {
                 resolve({
                     statusCode: res.statusCode,
-                    body: data ? JSON.parse(data) : null,
+                    body: data && options.parseJson !== false ? JSON.parse(data) : data,
+                    headers: res.headers,
                 });
             });
         });
@@ -59,6 +60,23 @@ describe('smart home backend endpoints', () => {
 
         assert.equal(response.statusCode, 401);
         assert.equal(response.body.error, 'Cần đăng nhập để sử dụng API');
+    });
+
+    it('serves public OpenAPI and Swagger UI docs', async () => {
+        const openApiResponse = await request('GET', '/openapi.json');
+        const docsResponse = await request('GET', '/api-docs', undefined, undefined, { parseJson: false });
+
+        assert.equal(openApiResponse.statusCode, 200);
+        assert.equal(openApiResponse.body.openapi, '3.0.3');
+        assert.ok(openApiResponse.body.paths['/lights/OnOff']);
+        assert.equal(docsResponse.statusCode, 200);
+        assert.match(docsResponse.body, /SwaggerUIBundle/);
+    });
+
+    it('evaluates MQ135 air quality from CO2 and CO levels', () => {
+        assert.equal(evaluateAirQuality(350, 5), 'GOOD');
+        assert.equal(evaluateAirQuality(800, 10), 'NORMAL');
+        assert.equal(evaluateAirQuality(1200, 40), 'BAD');
     });
 
     it('registers a user and returns a jwt', async () => {
@@ -147,5 +165,53 @@ describe('smart home backend endpoints', () => {
         assert.equal(hotFan.isAutoControlled, true);
         assert.equal(gasFan.status, 1);
         assert.equal(gasFan.isAutoControlled, true);
+    });
+
+    it('automatically turns a sensor-controlled fan off when conditions return to normal', async () => {
+        const fan = {
+            name: 'QUAT_1',
+            status: 1,
+            isAutoControlled: true,
+            manualOverride: false,
+            lastAutoReason: 'temperature',
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+
+        await autoTurnOnFans(25, 'GOOD', 5, 500);
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.isAutoControlled, false);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
+    it('respects manual fan off until sensor conditions return to normal', async () => {
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
+            isAutoControlled: true,
+            manualOverride: true,
+            lastAutoReason: null,
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+
+        await autoTurnOnFans(35, 'GOOD', 5, 500);
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, true);
+
+        await autoTurnOnFans(25, 'GOOD', 5, 500);
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, false);
     });
 });

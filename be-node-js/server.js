@@ -11,6 +11,7 @@ const axios = require('axios');
 const mqtt = require('mqtt');
 const authenticateToken = require('./middleware/authenticateToken');
 const { comparePassword, generateToken, hashPassword } = require('./auth');
+const { openApiDocument, swaggerHtml } = require('./openapi');
 const app = express();
 const requiredEnv = (name) => {
     if (!process.env[name]) {
@@ -277,9 +278,16 @@ mqttClient.on('message', async (topic, message) => {
                 // Cập nhật trạng thái của đèn
                 fan.status = type == 1 ? 1 : 0;
                 fan.isAutoControlled = type == 0;
+                fan.manualOverride = type == 0;
+                fan.lastAutoReason = null;
                 //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
-                log('DB][FAN', 'Synced fan status from device response', { name, status: fan.status, source: topic });
+                log('DB][FAN', 'Synced fan status from device response', {
+                    name,
+                    status: fan.status,
+                    manualOverride: fan.manualOverride,
+                    source: topic,
+                });
             }
             else {
                 logError('MQTT][FAN', 'Payload is not valid JSON', payload);
@@ -325,6 +333,14 @@ mqttClient.on('error', (err) => {
 });
 
 app.use(express.json());
+
+app.get('/openapi.json', (req, res) => {
+    res.status(200).json(openApiDocument);
+});
+
+app.get('/api-docs', (req, res) => {
+    res.status(200).type('html').send(swaggerHtml);
+});
 
 app.post('/auth/register', async (req, res) => {
     const { username, email, password } = req.body;
@@ -424,8 +440,15 @@ app.put('/fans/OnOff', async (req, res) => {
         // Cập nhật trạng thái của đèn
         fan.status = type === 1 ? 1 : 0;
         fan.isAutoControlled = type === 0;
+        fan.manualOverride = type === 0;
+        fan.lastAutoReason = null;
         await fan.save();
-        log('DB][FAN', 'Updated fan status from HTTP command', { name, status: fan.status, isAutoControlled: fan.isAutoControlled });
+        log('DB][FAN', 'Updated fan status from HTTP command', {
+            name,
+            status: fan.status,
+            isAutoControlled: fan.isAutoControlled,
+            manualOverride: fan.manualOverride,
+        });
 
         const message = JSON.stringify({ type });
 
@@ -867,11 +890,15 @@ const checkAutoFans = async () => {
                 // Bật quạt tự động nếu chưa được bật bởi hệ thống
                 if (fan.status === 1 && !fan.isAutoControlled) {
                     fan.isAutoControlled = true;
+                    fan.manualOverride = false;
+                    fan.lastAutoReason = 'timer';
                     await fan.save();
                 }
                 if (!fan.isAutoControlled && fan.status === 0) {
                     fan.status = 1;
                     fan.isAutoControlled = true; // Đánh dấu là quạt đã được bật tự động
+                    fan.manualOverride = false;
+                    fan.lastAutoReason = 'timer';
                     await fan.save();
 
                     // Gửi thông điệp MQTT để bật quạt
@@ -890,6 +917,7 @@ const checkAutoFans = async () => {
                 if (fan.isAutoControlled && fan.status === 1) {
                     fan.status = 0;
                     fan.isAutoControlled = false; // Đánh dấu là quạt đã được tắt tự động
+                    fan.lastAutoReason = null;
                     await fan.save();
 
                     // Gửi thông điệp MQTT để tắt đèn
@@ -995,14 +1023,72 @@ const autoTurnOnFans = async (currentTemperature, airQuality, coPpm, co2Ppm) => 
             const autoOnTemperature = fan.autoOnTemperature;
             const shouldTurnOnByTemperature = fan.autoOnByTemperature === true
                 && Number(currentTemperature) >= Number(autoOnTemperature);
-            const shouldTurnOn = shouldTurnOnByTemperature || isBadAir;
+            const shouldTurnOnByAirQuality = isBadAir;
+            const shouldTurnOn = shouldTurnOnByTemperature || shouldTurnOnByAirQuality;
             const reason = shouldTurnOnByTemperature ? 'temperature' : (isBadAir ? 'air_quality' : 'none');
+
+            if (!shouldTurnOn) {
+                if (fan.manualOverride) {
+                    fan.manualOverride = false;
+                    await fan.save();
+                    log('AUTO][FAN', 'Cleared manual override after sensor returned to normal', {
+                        name: fan.name,
+                        temp: currentTemperature,
+                        threshold: autoOnTemperature,
+                        airQuality,
+                        coPpm,
+                        co2Ppm,
+                    });
+                }
+
+                if (fan.status === 1 && fan.isAutoControlled && ['temperature', 'air_quality'].includes(fan.lastAutoReason)) {
+                    fan.status = 0;
+                    fan.isAutoControlled = false;
+                    fan.lastAutoReason = null;
+                    await fan.save();
+
+                    const message = JSON.stringify({ type: 0 });
+                    mqttClient.publish(FansControlTopic, message, { qos: 0 }, (err) => {
+                        if (err) {
+                            logError('MQTT][FAN', `Publish failed topic=${FansControlTopic}`, err);
+                        } else {
+                            log('AUTO][FAN', 'Turned fan off after sensor returned to normal', {
+                                name: fan.name,
+                                temp: currentTemperature,
+                                threshold: autoOnTemperature,
+                                airQuality,
+                                coPpm,
+                                co2Ppm,
+                                topic: FansControlTopic,
+                                payload: message,
+                            });
+                        }
+                    });
+                }
+
+                continue;
+            }
+
+            if (fan.manualOverride) {
+                log('AUTO][FAN', 'Skipped auto-on because user manually turned fan off', {
+                    name: fan.name,
+                    reason,
+                    temp: currentTemperature,
+                    threshold: autoOnTemperature,
+                    airQuality,
+                    coPpm,
+                    co2Ppm,
+                });
+                continue;
+            }
 
             // Chỉ bật quạt nếu nhiệt độ cao hơn ngưỡng hoặc chất lượng không khí xấu
             if (shouldTurnOn && fan.status === 0) {
                 // Cập nhật trạng thái quạt
                 fan.status = 1;
                 fan.isAutoControlled = true;
+                fan.manualOverride = false;
+                fan.lastAutoReason = reason;
                 await fan.save();
 
                 // Tạo thông điệp bật quạt
