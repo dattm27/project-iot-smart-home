@@ -11,8 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-
-const SERVER_URL = 'http://192.168.1.4:4000'; // Replace with your actual server URL
+import { apiFetch } from './api';
+import { useAuth } from './AuthContext';
 
 const gmt7Offset = -420;
 
@@ -26,13 +26,11 @@ const formatToISOWithOffset = (date: Date, offset: number): string => {
   return `${isoString}${offsetSign}${offsetHours}:${offsetMinutes}`;
 };
 
-const sendMessage = async (deviceName: string, type: number) => {
+const sendMessage = async (deviceName: string, type: number, token: string | null) => {
   try {
-    const response = await fetch(`${SERVER_URL}/lights/OnOff`, {
+    const response = await apiFetch('/lights/OnOff', {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      token,
       body: JSON.stringify({
         name: deviceName,
         type: type,
@@ -48,13 +46,11 @@ const sendMessage = async (deviceName: string, type: number) => {
   }
 };
 
-const sendTimer = async (deviceName: string, timerData: TimerData) => {
+const sendTimer = async (deviceName: string, timerData: TimerData, token: string | null) => {
   try {
-    const response = await fetch(`${SERVER_URL}/lights/Timer/`, {
+    const response = await apiFetch('/lights/Timer/', {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      token,
       body: JSON.stringify({
         name: "DEN_DUONG_2",
         timerEnabled: timerData.timerEnabled,
@@ -80,6 +76,7 @@ interface TimerData {
 
 const DevicesPage: React.FC = ({ route }: any) => {
   const { room } = route.params; // Get room name from navigation params
+  const { token } = useAuth();
   const devices = [
     { name: 'Light1', state: false },
     { name: 'Light2', state: true },
@@ -97,7 +94,7 @@ const DevicesPage: React.FC = ({ route }: any) => {
 
   const toggleDevice = (deviceName: string, currentState: boolean) => {
     const newType = currentState ? 0 : 1; // Toggle state
-    sendMessage(deviceName, newType);
+    sendMessage(deviceName, newType, token);
     setDeviceStates((prevStates) =>
       prevStates.map((device) =>
         device.name === deviceName ? { ...device, state: !currentState } : device
@@ -122,7 +119,7 @@ const DevicesPage: React.FC = ({ route }: any) => {
 
   const handleSetTimer = () => {
     if (selectedDevice) {
-      sendTimer(selectedDevice, timerData);
+      sendTimer(selectedDevice, timerData, token);
       setIsTimerModalVisible(false); // Close modal
     }
   };

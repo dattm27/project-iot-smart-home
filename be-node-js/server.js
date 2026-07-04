@@ -342,6 +342,14 @@ app.get('/api-docs', (req, res) => {
     res.status(200).type('html').send(swaggerHtml);
 });
 
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        service: 'iot-smart-home-backend',
+        timestamp: new Date().toISOString(),
+    });
+});
+
 app.post('/auth/register', async (req, res) => {
     const { username, email, password } = req.body;
 

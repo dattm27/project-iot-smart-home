@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, TouchableOpacity, Modal, Button } from 'react-native';
 import { LineChart } from 'react-native-chart-kit'; // For Line chart visualization
 import { Dimensions } from 'react-native';
+import { apiFetch } from './api';
+import { useAuth } from './AuthContext';
 
 // Get screen width for chart responsiveness
 const screenWidth = Dimensions.get('window').width;
@@ -16,15 +18,12 @@ const MonitoringPage: React.FC = () => {
   const [numOfRecords, setNumOfRecords] = useState<number>(10); // Specify number of records to fetch
   const [modalVisible, setModalVisible] = useState<boolean>(false); // Modal visibility for line chart
   const [chartData, setChartData] = useState<any>(null); // Data for line chart
-  const SERVER_URL = 'http://192.168.1.4:4000'; // Your server's IP address
+  const { token } = useAuth();
 
   // Fetch the data from the server with the specified number of records
   const fetchData = async () => {
     try {
-      const response = await fetch(`${SERVER_URL}/mq135statistics?NumOfRecords=${numOfRecords}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
+      const response = await apiFetch(`/mq135statistics?NumOfRecords=${numOfRecords}`, { token });
 
       const data = await response.json();
       console.log('Fetched data:', data);

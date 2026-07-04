@@ -1,6 +1,9 @@
 export type RootParamList = {
+    Login: undefined;
+    Register: undefined;
     Home: undefined;
-    Devices: undefined;
+    Devices: { room: string };
     Rooms: undefined;
+    Monitoring: undefined;
 };
   
