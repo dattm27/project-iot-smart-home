@@ -10,9 +10,9 @@
 //const char* mqtt_username = "dattran";
 //const char* mqtt_password = "Dattran2";
 //const int mqtt_port = 8883; // Mosquitto port mặc định
-const char* mqtt_server = "c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud";
-const char* mqtt_username = "dattran";
-const char* mqtt_password = "Dattran2";
+const char* mqtt_server = "f9d443cb65ba4c5db3969a8aa4329685.s1.eu.hivemq.cloud";
+const char* mqtt_username = "mqtt-test";
+const char* mqtt_password = "Son04072000";
 const int mqtt_port = 8883;
 const char* LIGHT_SERVER_TOPIC = "lights/01/server";
 const char* FAN_SERVER_TOPIC = "fans/01/server";
@@ -127,6 +127,17 @@ void initMQTT(const char* ssid, const char* password) {
     }
     Serial.println("\nWiFi connected!");
     Serial.println("IP Address: " + WiFi.localIP().toString());
+
+    // Đồng bộ thời gian hệ thống (bắt buộc để xác thực chứng chỉ TLS của HiveMQ)
+    configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.print("Waiting for NTP time sync...");
+    time_t nowSecs = time(nullptr);
+    while (nowSecs < 8 * 3600 * 2) {
+        delay(500);
+        Serial.print(".");
+        nowSecs = time(nullptr);
+    }
+    Serial.println(" done, current time: " + String(nowSecs));
 
     // Cấu hình MQTT
     espClient.setCACert(root_ca);

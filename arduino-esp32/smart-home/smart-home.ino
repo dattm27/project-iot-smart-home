@@ -66,14 +66,14 @@ void setup()
   turnFanOn(); 
   
   connectWifi();
-  // initMQTT(ssid, password);
+  initMQTT(ssid, password);
 }
 
 
 void loop()
 {
 
-  // handleMQTT();
+  handleMQTT();
   handleLightSensor();
   handleDHTSensor();
   handleLedButtonPressed();
@@ -120,10 +120,10 @@ void handleFanButtonPressed() {
 void handleDHTSensor() {
     float h = dht.readHumidity();
     float t = dht.readTemperature();
-    Serial.print("Temperature:");
-    Serial.println(String(t));
-    Serial.print("Humidity: ");
-    Serial.println(String(h));
+    // Serial.print("Temperature:");
+    // Serial.println(String(t));
+    // Serial.print("Humidity: ");
+    // Serial.println(String(h));
 }
 void handleLightSensor() {
     int lightLevel = analogRead(LIGHT_SENSOR_PIN);
@@ -138,8 +138,8 @@ void handleLightSensor() {
         lastDebounceTime = millis();
     }
 
-    Serial.print("Light level = ");
-    Serial.println(lightLevel);
+    // Serial.print("Light level = ");
+    // Serial.println(lightLevel);
 }
 
 void connectWifi()
@@ -177,8 +177,8 @@ void connectWifi()
 void handleSensorMQ135()
 {
   int ppm = analogRead(PIN_MQ135);
-  Serial.print("Gas PPM: ");
-  Serial.println(String(ppm));
+  // Serial.print("Gas PPM: ");
+  // Serial.println(String(ppm));
   if ( ppm > 3800)
   {
 
