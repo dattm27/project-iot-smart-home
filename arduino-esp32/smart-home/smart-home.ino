@@ -210,7 +210,8 @@ void updateAirqualityStatus(long interval)
   if (millis() - lastAirQualityStatusUpdate > interval)
   {
     int ppm = analogRead(PIN_MQ135);
-    String airQualityUpdateMsg = genAirQualityStatusMsg(ppm);
+    String currentDateTime = getCurrentDateTime();
+    String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, ppm);
     
     publishMessage(mqttStatistic, airQualityUpdateMsg, true);
     lastAirQualityStatusUpdate = millis();
