@@ -127,15 +127,17 @@ void handleDHTSensor() {
     // Serial.println(String(h));
 }
 void handleLightSensor() {
+    if (!autoLightEnabled) return;
+
     int lightLevel = analogRead(LIGHT_SENSOR_PIN);
 
     if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 10000)) {
-        toggleLight();
+        toggleLightAuto();
         lastDebounceTime = millis();
     }
 
     if ((lightLevel > 200) && (ledState == HIGH) && (millis() - lastDebounceTime > 10000)) {
-        toggleLight();
+        toggleLightAuto();
         lastDebounceTime = millis();
     }
 
@@ -243,9 +245,15 @@ void toggleBuzzer() {
 }
 
 void toggleLight(){
-    ledState = !ledState;        
-    digitalWrite(LED_1, ledState); 
+    ledState = !ledState;
+    digitalWrite(LED_1, ledState);
     genLightMsg(ledState == HIGH ? "1" : "0");
+}
+
+void toggleLightAuto(){
+    ledState = !ledState;
+    digitalWrite(LED_1, ledState);
+    genLightSensorMsg(ledState == HIGH ? "1" : "0");
 }
 
 String getCurrentDateTime()
