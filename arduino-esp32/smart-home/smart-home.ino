@@ -175,8 +175,8 @@ void connectWifi()
 void handleSensorMQ135()
 {
   int ppm = analogRead(PIN_MQ135);
-  // Serial.print("Gas PPM: ");
-  // Serial.println(String(ppm));
+  Serial.print("Gas PPM: ");
+  Serial.println(String(ppm));
   if ( ppm > 3800)
   {
 
@@ -185,9 +185,9 @@ void handleSensorMQ135()
     if (fireAlarmStatus.equals("inactive") || !lastNotify)
     {
       fireAlarmStatus = "active";
-      // String currentDateTime = getCurrentDateTime();
-      // String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
-      // publishMessage(sensor1_topic, alarmMsg, true);
+      String currentDateTime = getCurrentDateTime();
+      String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
+      publishMessage(sensor1_topic, alarmMsg, true);
       lastNotify = millis();
     }
   }
@@ -196,9 +196,9 @@ void handleSensorMQ135()
     if (millis() - lastNotify > 1000 * 60)
     {
       fireAlarmStatus = "inactive";
-      // String currentDateTime = getCurrentDateTime();
-      // String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
-      // publishMessage(sensor1_topic, alarmMsg, true);
+      String currentDateTime = getCurrentDateTime();
+      String alarmMsg = genAlarmMsg(currentDateTime, fireAlarmStatus);
+      publishMessage(sensor1_topic, alarmMsg, true);
       lastNotify = millis();
     }
   }
