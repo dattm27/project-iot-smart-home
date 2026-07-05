@@ -10,9 +10,6 @@ extern int MQ135_PIN;
 // Khởi tạo cảm biến
 void initMQ135(int pin);
 
-// Đọc giá trị nồng độ khí từ cảm biến
-float readCO2();
-
 // Đọc nồng độ khí cụ thể theo phần trăm
 float readPPM();
 

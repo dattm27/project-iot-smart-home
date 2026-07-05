@@ -26,13 +26,6 @@ void initMQ135(int pin) {
     
 }
 
-// Hàm đọc giá trị CO2 từ cảm biến
-float readCO2() {
-    float co2 =  mq135_sensor.getPPM();
-    Serial.println("CO2 Concentration: " + String(co2) + " ppm");
-    return co2;
-}
-
 // Hàm đọc nồng độ khí theo đơn vị PPM
 float readPPM() {
     float ppm =  mq135_sensor.getPPM();
