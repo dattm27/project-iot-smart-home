@@ -13,6 +13,7 @@
 #include "FanHandler.h"
 const char *sensor1_topic = "MQ135/FireAlarm";
 const char *mqttStatistic = "MQ135/Statistics";
+const char *dhtStatistic = "DHT22/Statistics";
 
 #define PIN_MQ135 32
 #define DHT_PIN 15
@@ -32,6 +33,7 @@ MQ135 mq135_sensor(PIN_MQ135);
 
 unsigned long lastNotify = 0;
 unsigned long lastAirQualityStatusUpdate = 0;
+unsigned long lastDHTStatusUpdate = 0;
 String fireAlarmStatus = "inactive";
 unsigned long lastDebounceTime = 0;
 unsigned long lastDebounceTime2 = 0;
@@ -82,6 +84,7 @@ void loop()
   handleFanButtonPressed();
   handleSensorMQ135();
   updateAirqualityStatus(1000 * 20);
+  updateDHTStatus(1000 * 20);
 
   delay(200);
 }
@@ -177,7 +180,7 @@ void handleSensorMQ135()
   int ppm = analogRead(PIN_MQ135);
   Serial.print("Gas PPM: ");
   Serial.println(String(ppm));
-  if ( ppm > 3800)
+  if ( ppm > 1100)
   {
 
     toggleBuzzer();
@@ -215,6 +218,21 @@ void updateAirqualityStatus(long interval)
     
     publishMessage(mqttStatistic, airQualityUpdateMsg, true);
     lastAirQualityStatusUpdate = millis();
+  }
+}
+
+void updateDHTStatus(long interval)
+{
+
+  if (millis() - lastDHTStatusUpdate > interval)
+  {
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    String currentDateTime = getCurrentDateTime();
+    String dhtStatusMsg = genDHTStatusMsg(currentDateTime, t, h);
+
+    publishMessage(dhtStatistic, dhtStatusMsg, true);
+    lastDHTStatusUpdate = millis();
   }
 }
 

@@ -178,6 +178,11 @@ String genAirQualityStatusMsg(String currentTime, float ppm) {
     return jsonPayload;
 }
 
+String genDHTStatusMsg(String currentTime, float temp, float humidity) {
+    String jsonPayload = "{ \"time\": \"" + currentTime + "\", \"temp\": " + String(temp) + ", \"humidity\": " + String(humidity) + " }";
+    return jsonPayload;
+}
+
 void genLightMsg(String status){
     Serial.println("Generate Fan Msg");
     String jsonPayload = "{\"status\": \"" + status + "\" }";
