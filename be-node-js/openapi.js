@@ -3,7 +3,7 @@ const openApiDocument = {
     info: {
         title: 'IoT Smart Home Backend API',
         version: '1.0.0',
-        description: 'Backend API for authentication, lights, fans, fire alarm, and MQ135 statistics.',
+        description: 'Backend API for authentication, lights, fans, fire alarm, MQ135 statistics, and DHT22 statistics.',
     },
     servers: [
         {
@@ -16,6 +16,7 @@ const openApiDocument = {
         { name: 'Lights' },
         { name: 'Fans' },
         { name: 'MQ135' },
+        { name: 'DHT22' },
         { name: 'Fire Alarm' },
     ],
     components: {
@@ -41,6 +42,7 @@ const openApiDocument = {
                 properties: {
                     message: { type: 'string' },
                     token: { type: 'string' },
+                    refreshToken: { type: 'string' },
                     user: {
                         type: 'object',
                         properties: {
@@ -49,6 +51,13 @@ const openApiDocument = {
                             email: { type: 'string' },
                         },
                     },
+                },
+            },
+            RefreshTokenRequest: {
+                type: 'object',
+                required: ['refreshToken'],
+                properties: {
+                    refreshToken: { type: 'string' },
                 },
             },
             DeviceOnOff: {
@@ -89,6 +98,7 @@ const openApiDocument = {
                     autoOnTime: { type: 'string', format: 'date-time', nullable: true },
                     autoOffTime: { type: 'string', format: 'date-time', nullable: true },
                     isAutoControlled: { type: 'boolean', example: false },
+                    lightSensorEnabled: { type: 'boolean', example: false },
                 },
             },
             CreateDevice: {
@@ -121,6 +131,14 @@ const openApiDocument = {
                     autoOnTemperature: { type: 'number', example: 30 },
                 },
             },
+            LightSensorModeRequest: {
+                type: 'object',
+                required: ['name', 'enabled'],
+                properties: {
+                    name: { type: 'string', example: 'DEN_PH' },
+                    enabled: { type: 'boolean', example: true },
+                },
+            },
             DeleteByName: {
                 type: 'object',
                 required: ['name'],
@@ -132,10 +150,19 @@ const openApiDocument = {
                 type: 'object',
                 properties: {
                     time: { type: 'string', example: '2026-06-29T10:00:00Z' },
-                    airQuality: { type: 'string', enum: ['GOOD', 'NORMAL', 'BAD'], example: 'BAD' },
-                    co2_ppm: { type: 'number', example: 1200 },
-                    co_ppm: { type: 'number', example: 40 },
+                    airQuality: { type: 'string', enum: ['GOOD', 'WARNING', 'DANGER', 'UNKNOWN'], example: 'DANGER' },
+                    ppm: { type: 'number', example: 1250 },
+                    co2_ppm: { type: 'number', example: 1250 },
+                    co_ppm: { type: 'number', example: 600 },
+                    timestamp: { type: 'string', format: 'date-time' },
+                },
+            },
+            DHT22Statistics: {
+                type: 'object',
+                properties: {
+                    time: { type: 'string', example: '2026-06-29 10-00-00' },
                     temp: { type: 'number', example: 35 },
+                    humidity: { type: 'number', example: 70 },
                     timestamp: { type: 'string', format: 'date-time' },
                 },
             },
@@ -167,6 +194,27 @@ const openApiDocument = {
                 responses: {
                     200: { description: 'Logged in', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
                     401: { description: 'Invalid credentials' },
+                },
+            },
+        },
+        '/auth/refresh': {
+            post: {
+                tags: ['Auth'],
+                summary: 'Exchange a refresh token for a new JWT and refresh token',
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RefreshTokenRequest' } } } },
+                responses: {
+                    200: { description: 'Token refreshed', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResponse' } } } },
+                    401: { description: 'Invalid or expired refresh token' },
+                },
+            },
+        },
+        '/auth/logout': {
+            post: {
+                tags: ['Auth'],
+                summary: 'Revoke a refresh token',
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RefreshTokenRequest' } } } },
+                responses: {
+                    200: { description: 'Logged out' },
                 },
             },
         },
@@ -209,6 +257,30 @@ const openApiDocument = {
                         content: {
                             'application/json': {
                                 schema: { type: 'array', items: { $ref: '#/components/schemas/MQ135Statistics' } },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/dht22statistics': {
+            get: {
+                tags: ['DHT22'],
+                summary: 'Get recent DHT22 temperature and humidity statistics',
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    {
+                        name: 'NumOfRecords',
+                        in: 'query',
+                        schema: { type: 'integer', default: 10 },
+                    },
+                ],
+                responses: {
+                    200: {
+                        description: 'Recent records',
+                        content: {
+                            'application/json': {
+                                schema: { type: 'array', items: { $ref: '#/components/schemas/DHT22Statistics' } },
                             },
                         },
                     },
@@ -292,6 +364,15 @@ const openApiDocument = {
                 summary: 'Turn a light on or off',
                 security: [{ bearerAuth: [] }],
                 requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/DeviceOnOff' } } } },
+                responses: { 200: { description: 'Updated' }, 404: { description: 'Not found' } },
+            },
+        },
+        '/lights/SensorMode': {
+            put: {
+                tags: ['Lights'],
+                summary: 'Enable or disable light control by the light sensor',
+                security: [{ bearerAuth: [] }],
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/LightSensorModeRequest' } } } },
                 responses: { 200: { description: 'Updated' }, 404: { description: 'Not found' } },
             },
         },

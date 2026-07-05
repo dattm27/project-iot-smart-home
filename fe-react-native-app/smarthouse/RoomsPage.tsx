@@ -2,15 +2,15 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
 const RoomsPage: React.FC = ({ navigation }: any) => {
-  const rooms = ['Living Room', 'Kitchen', 'Bedroom'];
+  const rooms = ['Phòng khách', 'Nhà bếp', 'Phòng ngủ'];
 
   const goToDevices = (room: string) => {
-    navigation.navigate('Devices', { room }); // Pass room name to DevicesPage
+    navigation.navigate('Devices', { room });
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Select a Room</Text>
+      <Text style={styles.title}>Chọn phòng</Text>
       {rooms.map((room) => (
         <TouchableOpacity
           key={room}

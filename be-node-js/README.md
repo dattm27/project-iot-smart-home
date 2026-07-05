@@ -31,11 +31,28 @@ MONGO_URI=mongodb+srv://<username>:<password>@<cluster-host>/?retryWrites=true&w
 HIVEMQ_USERNAME=be-server
 HIVEMQ_PASSWORD=<hivemq-password>
 JWT_SECRET=<strong-random-secret>
+JWT_EXPIRES_IN=15m
+REFRESH_TOKEN_TTL_MS=2592000000
+AUTH_RATE_LIMIT_WINDOW_MS=900000
+AUTH_RATE_LIMIT_MAX=8
 MQTT_BROKER_URL=mqtts://<cluster-id>.s1.eu.hivemq.cloud
 MQTT_PORT=8883
+MQTT_MQ135_STATISTICS_TOPIC=MQ135/Statistics
+MQTT_DHT22_STATISTICS_TOPIC=DHT22/Statistics
+MQTT_LIGHT_SENSOR_TOPIC=lights/01/sensor
+MQTT_LIGHT_SENSOR_CONTROL_TOPIC=lights/01/sensorControl
 ```
 
 Không commit file `.env`. Repo chỉ commit `.env.example`.
+
+## Bảo mật đã triển khai
+
+- Password được hash bằng `scrypt` kèm salt, không lưu plaintext.
+- API nghiệp vụ yêu cầu `Authorization: Bearer <access-token>`.
+- Access token là JWT ngắn hạn, refresh token dài hạn được lưu trong database ở dạng hash và được rotate sau mỗi lần refresh.
+- Login/register có rate limit theo IP + username để giảm brute-force.
+- Body API được validate strict kiểu dữ liệu, chặn payload object như `{ "$ne": null }` trước khi query MongoDB.
+- Kết nối MQTT dùng `mqtts://` với CA certificate, username/password.
 
 ## HiveMQ ACL
 
@@ -47,6 +64,7 @@ Các credential gợi ý cho thiết bị:
 | --- | --- | --- | --- |
 | `be-server` | `PUBLISH_SUBSCRIBE` | `#` | Backend |
 | `mq135-sensor` | `PUBLISH_SUBSCRIBE` | `MQ135/#` | Cảm biến MQ135 |
+| `dht22-sensor` | `PUBLISH_SUBSCRIBE` | `DHT22/#` | Cảm biến nhiệt độ/độ ẩm |
 | `light-01` | `PUBLISH_SUBSCRIBE` | `lights/01/#` | Thiết bị đèn |
 | `fan-01` | `PUBLISH_SUBSCRIBE` | `fans/01/#` | Thiết bị quạt |
 | `mqtt-test` | `PUBLISH_SUBSCRIBE` | `#` | Test thủ công, xong nên xóa/disable |
@@ -91,32 +109,30 @@ Chạy backend trước:
 npm start
 ```
 
-Đảm bảo đã tạo quạt `QUAT_1` và bật auto cooling:
+Đảm bảo đã tạo quạt `QUAT_1`, bật `autoOnByTemperature=true` và đặt `autoOnTemperature` phù hợp.
 
-```json
-{
-  "name": "QUAT_1",
-  "autoOnByTemperature": true,
-  "autoOnTemperature": 30
-}
-```
-
-Publish nhiệt độ cao:
+Publish nhiệt độ/độ ẩm DHT22 trước để backend có dữ liệu nhiệt mới nhất:
 
 ```powershell
-npm run test:auto-cooling -- --temp 35 --humidity 70 --co2 500 --co 5
+npm run test:dht22 -- --temp 35 --humidity 70
 ```
 
-Publish nhiệt độ bình thường:
+Publish PPM bình thường:
 
 ```powershell
-npm run test:auto-cooling -- --temp 25 --humidity 70 --co2 500 --co 5
+npm run test:auto-cooling -- --ppm 850
 ```
 
-Publish khí xấu/gas:
+Publish PPM không ổn nhưng chưa nguy hiểm, quạt có thể tự bật:
 
 ```powershell
-npm run test:auto-cooling -- --temp 25 --humidity 70 --co2 1200 --co 40
+npm run test:auto-cooling -- --ppm 1000
+```
+
+Publish PPM nguy hiểm/báo cháy:
+
+```powershell
+npm run test:auto-cooling -- --ppm 1250
 ```
 
 ## Auth flow
@@ -144,12 +160,16 @@ Authorization: Bearer <token>
 - Đèn:
   - Bật/tắt thủ công qua `PUT /lights/OnOff`.
   - Hẹn giờ qua `PUT /lights/Timer/`.
+  - Bật/tắt chế độ cảm biến ánh sáng qua `PUT /lights/SensorMode`, backend publish tới `lights/01/sensorControl` với payload `{ "enabled": 1 }` hoặc `{ "enabled": 0 }`.
+  - ESP32 publish trạng thái đèn do cảm biến ánh sáng điều khiển lên `lights/01/sensor` với payload `{ "status": 1 }` hoặc `{ "status": 0 }`.
   - Nếu người dùng tắt tay trong khung giờ auto, backend không bật lại ngay.
 
 - Quạt:
   - Bật/tắt thủ công qua `PUT /fans/OnOff`.
   - Auto cooling qua `PUT /fans/AutoCooling`.
-  - Khi nhiệt độ hoặc chất lượng không khí vượt ngưỡng, quạt tự bật.
+  - Quạt tự bật khi nhiệt độ cao hoặc PPM trong khoảng cần theo dõi 900-1100.
+  - Khi PPM lớn hơn 1100, backend không tự bật quạt để tránh làm lan khí gas.
+  - Khi PPM lớn hơn 1100, backend bật trạng thái báo cháy.
   - Khi sensor trở lại bình thường, quạt tự tắt nếu trước đó được sensor bật.
   - Nếu người dùng tắt tay khi quạt đang auto bật, backend tôn trọng thao tác tay và không bật lại ngay cho tới khi sensor trở lại bình thường.
 
@@ -159,9 +179,18 @@ Authorization: Bearer <token>
 
 ```json
 {
-  "time": "2026-06-29T10:00:00Z",
-  "co2_ppm": 1200,
-  "co_ppm": 40,
+  "time": "2026-06-29 10-00-00",
+  "ppm": 1250
+}
+```
+
+- DHT22:
+  - Backend subscribe topic `DHT22/Statistics`.
+  - Payload mẫu:
+
+```json
+{
+  "time": "2026-06-29 10-00-00",
   "temp": 35,
   "humidity": 70
 }

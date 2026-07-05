@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "test:auto-cooling": "node scripts/publish-mq135-sample.js"
+    "test:auto-cooling": "node scripts/publish-mq135-sample.js",
+    "test:dht22": "node scripts/publish-dht22-sample.js"
   },
   "keywords": [],
   "author": "",

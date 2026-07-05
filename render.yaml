@@ -21,7 +21,13 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRES_IN
-        value: 7d
+        value: 15m
+      - key: REFRESH_TOKEN_TTL_MS
+        value: '2592000000'
+      - key: AUTH_RATE_LIMIT_WINDOW_MS
+        value: '900000'
+      - key: AUTH_RATE_LIMIT_MAX
+        value: '8'
       - key: MONGO_URI
         sync: false
       - key: HIVEMQ_USERNAME
@@ -46,8 +52,14 @@ services:
         value: MQ135/FireAlarm
       - key: MQTT_MQ135_STATISTICS_TOPIC
         value: MQ135/Statistics
+      - key: MQTT_DHT22_STATISTICS_TOPIC
+        value: DHT22/Statistics
       - key: MQTT_LIGHTS_CONTROL_TOPIC
         value: lights/01/server
+      - key: MQTT_LIGHT_SENSOR_TOPIC
+        value: lights/01/sensor
+      - key: MQTT_LIGHT_SENSOR_CONTROL_TOPIC
+        value: lights/01/sensorControl
       - key: MQTT_LIGHTS_RESPONSE_TOPIC
         value: lights/01/button
       - key: MQTT_FANS_CONTROL_TOPIC
@@ -64,9 +76,3 @@ services:
         value: Asia/Ho_Chi_Minh
       - key: AUTO_CHECK_INTERVAL_MS
         value: '30000'
-      - key: AUTO_FAN_ON_BAD_AIR
-        value: 'true'
-      - key: AUTO_FAN_CO_THRESHOLD
-        value: '35'
-      - key: AUTO_FAN_CO2_THRESHOLD
-        value: '1000'

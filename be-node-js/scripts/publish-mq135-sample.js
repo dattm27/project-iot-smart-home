@@ -24,11 +24,8 @@ const fanCommandTopic = process.env.MQTT_FANS_CONTROL_TOPIC || 'fans/01/server';
 const waitMs = Number(getArg('wait', 8000));
 
 const payload = {
-    time: new Date().toISOString(),
-    co2_ppm: Number(getArg('co2', 500)),
-    co_ppm: Number(getArg('co', 5)),
-    temp: Number(getArg('temp', 35)),
-    humidity: Number(getArg('humidity', 70)),
+    time: new Date().toISOString().replace('T', ' ').slice(0, 19).replace(/:/g, '-'),
+    ppm: Number(getArg('ppm', 850)),
 };
 
 const client = mqtt.connect(requiredEnv('MQTT_BROKER_URL'), {
@@ -91,7 +88,7 @@ client.on('error', (error) => {
 setTimeout(() => {
     if (!sawFanCommand) {
         console.log('No fan command received before timeout.');
-        console.log('If backend is running and QUAT_1 has auto cooling enabled, check temp/threshold and server logs.');
+        console.log('If backend is running and QUAT_1 has auto cooling enabled, check temp threshold, ppm <= 1100, and server logs.');
     }
 
     close(0);

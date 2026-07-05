@@ -28,10 +28,10 @@ function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerTitleAlign: 'center' }}>
         {token ? (
           <>
-            <Stack.Screen name="Home" component={HomePage} />
-            <Stack.Screen name="Devices" component={DevicesPage} />
-            <Stack.Screen name="Rooms" component={RoomsPage} />
-            <Stack.Screen name="Monitoring" component={MonitorPage} />
+            <Stack.Screen name="Home" component={HomePage} options={{ title: 'Trang chủ' }} />
+            <Stack.Screen name="Devices" component={DevicesPage} options={{ title: 'Thiết bị' }} />
+            <Stack.Screen name="Rooms" component={RoomsPage} options={{ title: 'Phòng' }} />
+            <Stack.Screen name="Monitoring" component={MonitorPage} options={{ title: 'Giám sát' }} />
           </>
         ) : (
           <>

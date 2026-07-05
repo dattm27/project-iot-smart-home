@@ -33,6 +33,10 @@ const lightSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    lightSensorEnabled: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 // Tạo model từ schema
