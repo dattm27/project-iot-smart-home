@@ -11,7 +11,7 @@
 //const char* mqtt_password = "Dattran2";
 //const int mqtt_port = 8883; // Mosquitto port mặc định
 const char* mqtt_server = "f9d443cb65ba4c5db3969a8aa4329685.s1.eu.hivemq.cloud";
-const char* mqtt_username = "mqtt-test";
+const char* mqtt_username = "esp32-main";
 const char* mqtt_password = "Son04072000";
 const int mqtt_port = 8883;
 const char* LIGHT_SERVER_TOPIC = "lights/01/server";
