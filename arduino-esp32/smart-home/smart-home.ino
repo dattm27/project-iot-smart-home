@@ -35,6 +35,8 @@ unsigned long lastAirQualityStatusUpdate = 0;
 String fireAlarmStatus = "inactive";
 unsigned long lastDebounceTime = 0;
 unsigned long lastDebounceTime2 = 0;
+int lastLedButtonState = LOW;
+int lastFanButtonState = LOW;
 int ledState = HIGH;
 
 //const char *ssid = "La Thuy";
@@ -86,11 +88,9 @@ void loop()
 
 void handleLedButtonPressed() {
   
-  int ledButtonState = digitalRead(BUTTON_LED_PIN);
-  if (debounce(BUTTON_LED_PIN, lastDebounceTime))
+  if (debounce(BUTTON_LED_PIN, lastLedButtonState, lastDebounceTime))
   {
     Serial.print("Button pressed");
-    lastDebounceTime = millis();
     toggleBuzzer();
     toggleLight();
   }
@@ -98,10 +98,8 @@ void handleLedButtonPressed() {
 
 void handleFanButtonPressed() {
   
-  int fanButtonState = digitalRead(BUTTON_FAN_PIN);
-  if (debounce(BUTTON_FAN_PIN, lastDebounceTime2))
+  if (debounce(BUTTON_FAN_PIN, lastFanButtonState, lastDebounceTime2))
   {
-    lastDebounceTime2 = millis();
     toggleBuzzer();
     if (isFanOn())
     {
@@ -254,10 +252,13 @@ String getCurrentDateTime()
 }
 
 
-bool debounce(int pin, unsigned long &lastTime) {
-    if (digitalRead(pin) == HIGH && (millis() - lastTime > DEBOUNCE_DELAY)) {
+bool debounce(int pin, int &lastState, unsigned long &lastTime) {
+    int currentState = digitalRead(pin);
+    bool triggered = false;
+    if (currentState == HIGH && lastState == LOW && (millis() - lastTime > DEBOUNCE_DELAY)) {
+        triggered = true;
         lastTime = millis();
-        return true;
     }
-    return false;
+    lastState = currentState;
+    return triggered;
 }
