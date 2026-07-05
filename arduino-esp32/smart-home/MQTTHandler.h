@@ -10,6 +10,8 @@ extern const char* mqtt_server;
 extern const char* mqtt_username;
 extern const char* mqtt_password;
 extern const int mqtt_port;
+extern bool autoLightEnabled;
+extern int ledState;
 
 // Hàm khởi tạo và quản lý MQTT
 void initMQTT(const char* ssid, const char* password);
@@ -17,6 +19,8 @@ void publishMessage(const char* topic, String payload, boolean retained);
 void handleMQTT();
 String genAlarmMsg(String currentTime, String status) ;
 void genLightMsg(String status);
+void genLightSensorMsg(String status);
 void genFanMsg(String status);
-String genAirQualityStatusMsg(String currentTime,float CO2, float CO, float temp) ;
+String genAirQualityStatusMsg(String currentTime, float ppm) ;
+String genDHTStatusMsg(String currentTime, float temp, float humidity) ;
 #endif // MQTT_HANDLER_H

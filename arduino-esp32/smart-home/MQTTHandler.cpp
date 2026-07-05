@@ -10,14 +10,18 @@
 //const char* mqtt_username = "dattran";
 //const char* mqtt_password = "Dattran2";
 //const int mqtt_port = 8883; // Mosquitto port mặc định
-const char* mqtt_server = "c509d576b5cb44a0ac951816712cb591.s1.eu.hivemq.cloud";
-const char* mqtt_username = "dattran";
-const char* mqtt_password = "Dattran2";
+const char* mqtt_server = "f9d443cb65ba4c5db3969a8aa4329685.s1.eu.hivemq.cloud";
+const char* mqtt_username = "esp32-main";
+const char* mqtt_password = "Son04072000";
 const int mqtt_port = 8883;
 const char* LIGHT_SERVER_TOPIC = "lights/01/server";
 const char* FAN_SERVER_TOPIC = "fans/01/server";
 const char* LIGHT_BUTTON_TOPIC = "lights/01/button";
 const char* FAN_BUTTON_TOPIC = "fans/01/button";
+const char* LIGHT_SENSOR_TOPIC = "lights/01/sensor";
+const char* LIGHT_SENSOR_CONTROL_TOPIC = "lights/01/sensorControl";
+
+bool autoLightEnabled = true;
 
 static const char* root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -97,17 +101,26 @@ void callback(char* topic, byte* payload, unsigned int length) {
         }
     }
 
+    if (String(topic) == LIGHT_SENSOR_CONTROL_TOPIC) {
+        if (doc.containsKey("enabled")) {
+            int enabled = doc["enabled"];
+            autoLightEnabled = (enabled != 0);
+            Serial.println(autoLightEnabled ? "Auto light control ENABLED" : "Auto light control DISABLED");
+        }
+    }
+
     if (String(topic) == LIGHT_SERVER_TOPIC) {
         digitalWrite(BUZZER_PIN, HIGH);
         delay(100); // Kêu trong 100ms
         digitalWrite(BUZZER_PIN, LOW);
         int type = doc["type"]; // Lấy giá trị "type" từ JSON
         if (type == 1) {
-            digitalWrite(LED_1, HIGH); 
+            ledState = HIGH;
+            digitalWrite(LED_1, ledState);
             Serial.println("Light turned ON");
         } else if (type == 0) {
-            
-            digitalWrite(LED_1, LOW); 
+            ledState = LOW;
+            digitalWrite(LED_1, ledState);
             Serial.println("Light turned OFF");
         } else {
             Serial.println("Unknown type value");
@@ -128,6 +141,17 @@ void initMQTT(const char* ssid, const char* password) {
     Serial.println("\nWiFi connected!");
     Serial.println("IP Address: " + WiFi.localIP().toString());
 
+    // Đồng bộ thời gian hệ thống (bắt buộc để xác thực chứng chỉ TLS của HiveMQ)
+    configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.print("Waiting for NTP time sync...");
+    time_t nowSecs = time(nullptr);
+    while (nowSecs < 8 * 3600 * 2) {
+        delay(500);
+        Serial.print(".");
+        nowSecs = time(nullptr);
+    }
+    Serial.println(" done, current time: " + String(nowSecs));
+
     // Cấu hình MQTT
     espClient.setCACert(root_ca);
     client.setServer(mqtt_server, mqtt_port); // Cấu hình server MQTT
@@ -142,10 +166,12 @@ void handleMQTT() {
             String clientId = "ESP32Client-" + String(random(0xffff), HEX);
             if (client.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
                 Serial.println("connected!");
-                client.subscribe(LIGHT_SERVER_TOPIC); 
-                 client.subscribe(FAN_SERVER_TOPIC); 
+                client.subscribe(LIGHT_SERVER_TOPIC);
+                 client.subscribe(FAN_SERVER_TOPIC);
+                client.subscribe(LIGHT_SENSOR_CONTROL_TOPIC);
                 Serial.println("Subscribed to topic: lights/01");
                 Serial.println("Subscribed to topic: fans/01");
+                Serial.println("Subscribed to topic: lights/01/sensorControl");
             } else {
                 Serial.print("failed, rc=");
                 Serial.print(client.state());
@@ -162,8 +188,13 @@ String genAlarmMsg(String currentTime, String status) {
     return jsonPayload;
 }
 
-String genAirQualityStatusMsg(String currentTime,float CO2, float CO, float temp) { 
-    String jsonPayload =  "{ \"time\": \"" + currentTime + "\", \"co2_ppm\": \"" + CO2 + "\" , \"co_ppm\": \"" + CO + "\" , \"temp\": \"" + temp + "\"}";
+String genAirQualityStatusMsg(String currentTime, float ppm) {
+    String jsonPayload = "{ \"time\": \"" + currentTime + "\", \"ppm\": \"" + String(ppm) + "\" }";
+    return jsonPayload;
+}
+
+String genDHTStatusMsg(String currentTime, float temp, float humidity) {
+    String jsonPayload = "{ \"time\": \"" + currentTime + "\", \"temp\": " + String(temp) + ", \"humidity\": " + String(humidity) + " }";
     return jsonPayload;
 }
 
@@ -171,6 +202,11 @@ void genLightMsg(String status){
     Serial.println("Generate Fan Msg");
     String jsonPayload = "{\"status\": \"" + status + "\" }";
      publishMessage(LIGHT_BUTTON_TOPIC, jsonPayload, true);
+}
+
+void genLightSensorMsg(String status){
+    String jsonPayload = "{\"status\": \"" + status + "\" }";
+    publishMessage(LIGHT_SENSOR_TOPIC, jsonPayload, true);
 }
 
 void genFanMsg(String status){

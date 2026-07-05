@@ -13,6 +13,7 @@
 #include "FanHandler.h"
 const char *sensor1_topic = "MQ135/FireAlarm";
 const char *mqttStatistic = "MQ135/Statistics";
+const char *dhtStatistic = "DHT22/Statistics";
 
 #define PIN_MQ135 32
 #define DHT_PIN 15
@@ -32,15 +33,18 @@ MQ135 mq135_sensor(PIN_MQ135);
 
 unsigned long lastNotify = 0;
 unsigned long lastAirQualityStatusUpdate = 0;
+unsigned long lastDHTStatusUpdate = 0;
 String fireAlarmStatus = "inactive";
 unsigned long lastDebounceTime = 0;
 unsigned long lastDebounceTime2 = 0;
+int lastLedButtonState = LOW;
+int lastFanButtonState = LOW;
 int ledState = HIGH;
 
 //const char *ssid = "La Thuy";
 //const char *password = "hoilamchi";
- const char *ssid = "Đạt’s iPhone";
- const char *password = "datiphone";
+ const char *ssid = "DayAA";
+ const char *password = "66668888";
 
 const long utcOffsetInSeconds = 7 * 3600; // Hanoi timezone (GMT+7)
 
@@ -66,31 +70,30 @@ void setup()
   turnFanOn(); 
   
   connectWifi();
-  initMQTT(ssid, password); 
+  initMQTT(ssid, password);
 }
 
 
 void loop()
 {
 
-  handleMQTT(); 
+  handleMQTT();
   handleLightSensor();
   handleDHTSensor();
   handleLedButtonPressed();
   handleFanButtonPressed();
   handleSensorMQ135();
   updateAirqualityStatus(1000 * 20);
+  updateDHTStatus(1000 * 20);
 
   delay(200);
 }
 
 void handleLedButtonPressed() {
   
-  int ledButtonState = digitalRead(BUTTON_LED_PIN);
-  if (debounce(BUTTON_LED_PIN, lastDebounceTime))
+  if (debounce(BUTTON_LED_PIN, lastLedButtonState, lastDebounceTime))
   {
     Serial.print("Button pressed");
-    lastDebounceTime = millis();
     toggleBuzzer();
     toggleLight();
   }
@@ -98,10 +101,8 @@ void handleLedButtonPressed() {
 
 void handleFanButtonPressed() {
   
-  int fanButtonState = digitalRead(BUTTON_FAN_PIN);
-  if (debounce(BUTTON_FAN_PIN, lastDebounceTime2))
+  if (debounce(BUTTON_FAN_PIN, lastFanButtonState, lastDebounceTime2))
   {
-    lastDebounceTime2 = millis();
     toggleBuzzer();
     if (isFanOn())
     {
@@ -120,21 +121,28 @@ void handleFanButtonPressed() {
 void handleDHTSensor() {
     float h = dht.readHumidity();
     float t = dht.readTemperature();
-    Serial.print("Temperature:");
-    Serial.println(String(t));
-    Serial.print("Humidity: ");
-    Serial.println(String(h));
+    // Serial.print("Temperature:");
+    // Serial.println(String(t));
+    // Serial.print("Humidity: ");
+    // Serial.println(String(h));
 }
 void handleLightSensor() {
+    if (!autoLightEnabled) return;
+
     int lightLevel = analogRead(LIGHT_SENSOR_PIN);
-   if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 20000) ) {
-      toggleLight();
-      lastDebounceTime = millis();
 
-   }
+    if ((lightLevel < 80) && (ledState == LOW) && (millis() - lastDebounceTime > 10000)) {
+        toggleLightAuto();
+        lastDebounceTime = millis();
+    }
 
-  Serial.print("Light level = ");
-  Serial.println(lightLevel); 
+    if ((lightLevel > 200) && (ledState == HIGH) && (millis() - lastDebounceTime > 10000)) {
+        toggleLightAuto();
+        lastDebounceTime = millis();
+    }
+
+    // Serial.print("Light level = ");
+    // Serial.println(lightLevel);
 }
 
 void connectWifi()
@@ -174,13 +182,10 @@ void handleSensorMQ135()
   int ppm = analogRead(PIN_MQ135);
   Serial.print("Gas PPM: ");
   Serial.println(String(ppm));
-  if ( ppm > 2000)
+  if ( ppm > 1100)
   {
 
-    for (int i = 0; i < 10; i++)
-    {
-      toggleBuzzer();
-    }
+    toggleBuzzer();
 
     if (fireAlarmStatus.equals("inactive") || !lastNotify)
     {
@@ -209,14 +214,27 @@ void updateAirqualityStatus(long interval)
 
   if (millis() - lastAirQualityStatusUpdate > interval)
   {
-    float CO2 = readCO2();
-    float CO = readPPM();
+    int ppm = analogRead(PIN_MQ135);
     String currentDateTime = getCurrentDateTime();
-    float t = dht.readTemperature();
-    String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, CO2, CO, t);
+    String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, ppm);
     
     publishMessage(mqttStatistic, airQualityUpdateMsg, true);
     lastAirQualityStatusUpdate = millis();
+  }
+}
+
+void updateDHTStatus(long interval)
+{
+
+  if (millis() - lastDHTStatusUpdate > interval)
+  {
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    String currentDateTime = getCurrentDateTime();
+    String dhtStatusMsg = genDHTStatusMsg(currentDateTime, t, h);
+
+    publishMessage(dhtStatistic, dhtStatusMsg, true);
+    lastDHTStatusUpdate = millis();
   }
 }
 
@@ -227,9 +245,15 @@ void toggleBuzzer() {
 }
 
 void toggleLight(){
-    ledState = !ledState;        
-    digitalWrite(LED_1, ledState); 
+    ledState = !ledState;
+    digitalWrite(LED_1, ledState);
     genLightMsg(ledState == HIGH ? "1" : "0");
+}
+
+void toggleLightAuto(){
+    ledState = !ledState;
+    digitalWrite(LED_1, ledState);
+    genLightSensorMsg(ledState == HIGH ? "1" : "0");
 }
 
 String getCurrentDateTime()
@@ -252,10 +276,13 @@ String getCurrentDateTime()
 }
 
 
-bool debounce(int pin, unsigned long &lastTime) {
-    if (digitalRead(pin) == HIGH && (millis() - lastTime > DEBOUNCE_DELAY)) {
+bool debounce(int pin, int &lastState, unsigned long &lastTime) {
+    int currentState = digitalRead(pin);
+    bool triggered = false;
+    if (currentState == HIGH && lastState == LOW && (millis() - lastTime > DEBOUNCE_DELAY)) {
+        triggered = true;
         lastTime = millis();
-        return true;
     }
-    return false;
+    lastState = currentState;
+    return triggered;
 }
