@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "smarthouse",
+    "slug": "smarthouse",
+    "version": "1.0.0",
+    "jsEngine": "jsc",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}

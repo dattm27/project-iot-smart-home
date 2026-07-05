@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "start": "npm --prefix smarthouse start",
+    "start:clear": "npm --prefix smarthouse run start:clear",
+    "start:tunnel": "npm --prefix smarthouse run start:tunnel",
+    "ios": "npm --prefix smarthouse run ios",
+    "android": "npm --prefix smarthouse run android"
+  },
+  "devDependencies": {
+    "@react-native-community/cli": "^15.1.2"
+  }
+}
