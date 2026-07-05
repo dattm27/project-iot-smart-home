@@ -41,6 +41,15 @@ const fanSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    manualOverride: {
+        type: Boolean,
+        default: false,
+    },
+    lastAutoReason: {
+        type: String,
+        enum: ['temperature', 'air_quality', 'timer', null],
+        default: null,
+    },
 });
 
 // Tạo model từ schema

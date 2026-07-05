@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: project-iot-smart-home-api
+    runtime: node
+    rootDir: be-node-js
+    region: singapore
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: '10000'
+      - key: SERVER_IP
+        value: 0.0.0.0
+      - key: PHONE_IP
+        value: https://example.com
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: REFRESH_TOKEN_TTL_MS
+        value: '2592000000'
+      - key: AUTH_RATE_LIMIT_WINDOW_MS
+        value: '900000'
+      - key: AUTH_RATE_LIMIT_MAX
+        value: '8'
+      - key: MONGO_URI
+        sync: false
+      - key: HIVEMQ_USERNAME
+        sync: false
+      - key: HIVEMQ_PASSWORD
+        sync: false
+      - key: MQTT_BROKER_URL
+        sync: false
+      - key: MQTT_PORT
+        value: '8883'
+      - key: MQTT_CLIENT_ID
+        value: render-backend
+      - key: MQTT_CLEAN
+        value: 'true'
+      - key: MQTT_RECONNECT_PERIOD_MS
+        value: '1000'
+      - key: MQTT_CONNECT_TIMEOUT_MS
+        value: '30000'
+      - key: MQTT_CA_CERT_PATH
+        value: ./CERT.txt
+      - key: MQTT_FIRE_ALARM_TOPIC
+        value: MQ135/FireAlarm
+      - key: MQTT_MQ135_STATISTICS_TOPIC
+        value: MQ135/Statistics
+      - key: MQTT_DHT22_STATISTICS_TOPIC
+        value: DHT22/Statistics
+      - key: MQTT_LIGHTS_CONTROL_TOPIC
+        value: lights/01/server
+      - key: MQTT_LIGHT_SENSOR_TOPIC
+        value: lights/01/sensor
+      - key: MQTT_LIGHT_SENSOR_CONTROL_TOPIC
+        value: lights/01/sensorControl
+      - key: MQTT_LIGHTS_RESPONSE_TOPIC
+        value: lights/01/button
+      - key: MQTT_FANS_CONTROL_TOPIC
+        value: fans/01/server
+      - key: MQTT_FANS_RESPONSE_TOPIC
+        value: fans/01/button
+      - key: MQTT_MQ135_PERIOD_TOPIC
+        value: MQ135/Period
+      - key: DEFAULT_FAN_NAME
+        value: QUAT_1
+      - key: DEFAULT_LIGHT_NAME
+        value: DEN_PH
+      - key: TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: AUTO_CHECK_INTERVAL_MS
+        value: '30000'
