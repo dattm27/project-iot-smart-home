@@ -81,7 +81,7 @@ void loop()
   handleLedButtonPressed();
   handleFanButtonPressed();
   handleSensorMQ135();
-  // updateAirqualityStatus(1000 * 20);
+  updateAirqualityStatus(1000 * 20);
 
   delay(200);
 }
@@ -209,11 +209,8 @@ void updateAirqualityStatus(long interval)
 
   if (millis() - lastAirQualityStatusUpdate > interval)
   {
-    float CO2 = readCO2();
-    float CO = readPPM();
-    String currentDateTime = getCurrentDateTime();
-    float t = dht.readTemperature();
-    String airQualityUpdateMsg = genAirQualityStatusMsg(currentDateTime, CO2, CO, t);
+    int ppm = analogRead(PIN_MQ135);
+    String airQualityUpdateMsg = genAirQualityStatusMsg(ppm);
     
     publishMessage(mqttStatistic, airQualityUpdateMsg, true);
     lastAirQualityStatusUpdate = millis();

@@ -18,5 +18,5 @@ void handleMQTT();
 String genAlarmMsg(String currentTime, String status) ;
 void genLightMsg(String status);
 void genFanMsg(String status);
-String genAirQualityStatusMsg(String currentTime,float CO2, float CO, float temp) ;
+String genAirQualityStatusMsg(float ppm) ;
 #endif // MQTT_HANDLER_H

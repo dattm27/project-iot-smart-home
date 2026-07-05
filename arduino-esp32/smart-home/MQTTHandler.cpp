@@ -173,8 +173,8 @@ String genAlarmMsg(String currentTime, String status) {
     return jsonPayload;
 }
 
-String genAirQualityStatusMsg(String currentTime,float CO2, float CO, float temp) { 
-    String jsonPayload =  "{ \"time\": \"" + currentTime + "\", \"co2_ppm\": \"" + CO2 + "\" , \"co_ppm\": \"" + CO + "\" , \"temp\": \"" + temp + "\"}";
+String genAirQualityStatusMsg(float ppm) {
+    String jsonPayload = "{ \"ppm\": \"" + String(ppm) + "\" }";
     return jsonPayload;
 }
 
