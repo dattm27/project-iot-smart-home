@@ -19,6 +19,15 @@ const requiredEnv = (name) => {
     return process.env[name];
 };
 
+const requiredEnvAny = (...names) => {
+    const foundName = names.find((name) => process.env[name]);
+    if (!foundName) {
+        throw new Error(`${names.join(' or ')} is required in .env`);
+    }
+
+    return process.env[foundName];
+};
+
 const topic = getArg('topic', process.env.MQTT_MQ135_STATISTICS_TOPIC || 'MQ135/Statistics');
 const fanCommandTopic = process.env.MQTT_FANS_CONTROL_TOPIC || 'fans/01/server';
 const waitMs = Number(getArg('wait', 8000));
@@ -30,8 +39,8 @@ const payload = {
 
 const client = mqtt.connect(requiredEnv('MQTT_BROKER_URL'), {
     port: Number(requiredEnv('MQTT_PORT')),
-    username: requiredEnv('HIVEMQ_USERNAME'),
-    password: requiredEnv('HIVEMQ_PASSWORD'),
+    username: requiredEnvAny('MQTT_USERNAME', 'HIVEMQ_USERNAME'),
+    password: requiredEnvAny('MQTT_PASSWORD', 'HIVEMQ_PASSWORD'),
     clientId: `mq135-test-${Date.now()}`,
     clean: true,
     connectTimeout: 10000,

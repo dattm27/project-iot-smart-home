@@ -20,6 +20,13 @@ const requiredEnv = (name) => {
     }
     return process.env[name];
 };
+const requiredEnvAny = (...names) => {
+    const foundName = names.find((name) => process.env[name]);
+    if (!foundName) {
+        throw new Error(`${names.join(' or ')} is required`);
+    }
+    return process.env[foundName];
+};
 const log = (scope, message, data = {}) => {
     const details = Object.entries(data)
         .filter(([, value]) => value !== undefined && value !== null)
@@ -38,21 +45,23 @@ const port = Number(requiredEnv('PORT'));
 const ip = requiredEnv('SERVER_IP');
 const brokerUrl = requiredEnv('MQTT_BROKER_URL');
 const phoneIp = requiredEnv('PHONE_IP');
-const caCertPath = requiredEnv('MQTT_CA_CERT_PATH');
-const caCert = process.env.NODE_ENV === 'test' ? undefined : fs.readFileSync(path.resolve(__dirname, caCertPath));
-const hiveMQusername = requiredEnv('HIVEMQ_USERNAME');
-const hiveMQpassword = requiredEnv('HIVEMQ_PASSWORD');
+const caCertPath = process.env.MQTT_CA_CERT_PATH;
+const caCert = process.env.NODE_ENV === 'test' || !caCertPath
+    ? undefined
+    : fs.readFileSync(path.resolve(__dirname, caCertPath));
+const mqttUsername = requiredEnvAny('MQTT_USERNAME', 'HIVEMQ_USERNAME');
+const mqttPassword = requiredEnvAny('MQTT_PASSWORD', 'HIVEMQ_PASSWORD');
 log('CONFIG', 'Loaded MQTT config', { brokerUrl, port: process.env.MQTT_PORT, clientId: process.env.MQTT_CLIENT_ID });
 
 const options = {
     port: Number(requiredEnv('MQTT_PORT')),
-    username: hiveMQusername,
-    password: hiveMQpassword,
+    username: mqttUsername,
+    password: mqttPassword,
     clientId: requiredEnv('MQTT_CLIENT_ID'),
     clean: requiredEnv('MQTT_CLEAN') === 'true',
     reconnectPeriod: Number(requiredEnv('MQTT_RECONNECT_PERIOD_MS')),
     connectTimeout: Number(requiredEnv('MQTT_CONNECT_TIMEOUT_MS')),
-    ca: caCert,
+    ...(caCert ? { ca: caCert } : {}),
 };
 
 // Khai báo các topic
@@ -125,6 +134,11 @@ function isValidJson(str) {
 const toFiniteNumber = (value) => {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : undefined;
+};
+
+const getDeviceStatusFromPayload = (payload) => {
+    const statusValue = toFiniteNumber(payload.type ?? payload.status);
+    return statusValue === 0 || statusValue === 1 ? statusValue : undefined;
 };
 
 const authRateLimitStore = new Map();
@@ -526,9 +540,17 @@ mqttClient.on('message', async (topic, message) => {
         // Trả về phản hồi thành công
         try {
             if (isValidJson(payload)) {
-                const { type, name: payloadName } = JSON.parse(payload);
+                const parsedPayload = JSON.parse(payload);
+                const { name: payloadName } = parsedPayload;
+                const statusValue = getDeviceStatusFromPayload(parsedPayload);
                 const name = payloadName || defaultFanName;
-                log('MQTT][FAN', 'Received device response', { name, action: actionText(type), topic });
+                log('MQTT][FAN', 'Received device response', { name, action: actionText(statusValue), status: statusValue, topic });
+
+                if (statusValue === undefined) {
+                    logError('MQTT][FAN', 'Invalid payload, missing valid type/status', payload);
+                    return;
+                }
+
                 let fan = await Fan.findOne({ name });
 
                 if (!fan) {
@@ -537,9 +559,9 @@ mqttClient.on('message', async (topic, message) => {
                 }
                 // console.log("HIEU LENH TYPE: ", type);
                 // Cập nhật trạng thái của đèn
-                fan.status = type == 1 ? 1 : 0;
-                fan.isAutoControlled = type == 0;
-                fan.manualOverride = type == 0;
+                fan.status = statusValue;
+                fan.isAutoControlled = statusValue === 0;
+                fan.manualOverride = statusValue === 0;
                 fan.lastAutoReason = null;
                 //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
@@ -562,9 +584,17 @@ mqttClient.on('message', async (topic, message) => {
     if (topic === LightsResponseTopic) {
         try {
             if (isValidJson(payload)) {
-                const { type, name: payloadName } = JSON.parse(payload);
+                const parsedPayload = JSON.parse(payload);
+                const { name: payloadName } = parsedPayload;
+                const statusValue = getDeviceStatusFromPayload(parsedPayload);
                 const name = payloadName || defaultLightName;
-                log('MQTT][LIGHT', 'Received device response', { name, action: actionText(type), topic });
+                log('MQTT][LIGHT', 'Received device response', { name, action: actionText(statusValue), status: statusValue, topic });
+
+                if (statusValue === undefined) {
+                    logError('MQTT][LIGHT', 'Invalid payload, missing valid type/status', payload);
+                    return;
+                }
+
                 let light = await Light.findOne({ name });
 
                 if (!light) {
@@ -573,8 +603,8 @@ mqttClient.on('message', async (topic, message) => {
                 }
 
                 // Cập nhật trạng thái của đèn
-                light.status = type == 1 ? 1 : 0;
-                light.isAutoControlled = type == 0;
+                light.status = statusValue;
+                light.isAutoControlled = statusValue === 0;
                 await light.save();
                 log('DB][LIGHT', 'Synced light status from device response', { name, status: light.status, source: topic });
             }
@@ -1021,7 +1051,8 @@ app.put('/lights/OnOff', async (req, res) => {
             // Trả về phản hồi thành công
             res.status(200).json({
                 message: type === 1 ? 'Đèn đã bật' : 'Đèn đã tắt',
-                lightStatus: light.status
+                lightStatus: light.status,
+                light,
             });
         });
 
@@ -1411,10 +1442,7 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
         }
         const ppmValue = toFiniteNumber(ppm);
         const isGasLevelKnown = ppmValue !== undefined;
-        const isDangerousGas = isGasLevelKnown && ppmValue > fireWarningPpmThreshold;
-        const shouldTurnOnByAirQuality = ppmValue !== undefined
-            && ppmValue >= warningPpmThreshold
-            && ppmValue <= fireWarningPpmThreshold;
+        const isAirQualitySafeForCooling = isGasLevelKnown && ppmValue < warningPpmThreshold;
 
         // Duyệt qua tất cả các quạt
         for (const fan of fans) {
@@ -1422,9 +1450,9 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
             const shouldTurnOnByTemperature = fan.autoOnByTemperature === true
                 && isGasLevelKnown
                 && Number(currentTemperature) >= Number(autoOnTemperature)
-                && !isDangerousGas;
-            const shouldTurnOn = shouldTurnOnByTemperature || shouldTurnOnByAirQuality;
-            const reason = shouldTurnOnByTemperature ? 'temperature' : (shouldTurnOnByAirQuality ? 'air_quality' : 'none');
+                && isAirQualitySafeForCooling;
+            const shouldTurnOn = shouldTurnOnByTemperature;
+            const reason = shouldTurnOnByTemperature ? 'temperature' : 'none';
 
             if (!shouldTurnOn) {
                 if (fan.manualOverride) {
@@ -1439,7 +1467,7 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
                     });
                 }
 
-                if (fan.status === 1 && fan.isAutoControlled && ['temperature', 'air_quality'].includes(fan.lastAutoReason)) {
+                if (fan.status === 1 && fan.isAutoControlled && fan.lastAutoReason === 'temperature') {
                     fan.status = 0;
                     fan.isAutoControlled = false;
                     fan.lastAutoReason = null;
@@ -1478,7 +1506,7 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
                 continue;
             }
 
-            // Không bật quạt khi PPM đã vượt ngưỡng nguy hiểm để tránh lan khí gas.
+            // Chỉ tự bật quạt khi nhà nóng và PPM đang dưới ngưỡng an toàn.
             if (shouldTurnOn && fan.status === 0) {
                 // Cập nhật trạng thái quạt
                 fan.status = 1;
@@ -1532,5 +1560,6 @@ module.exports = {
     checkAutoFans,
     checkAutoLights,
     evaluateAirQuality,
+    getDeviceStatusFromPayload,
     isTimeBetween,
 };

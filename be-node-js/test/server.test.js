@@ -6,7 +6,7 @@ const http = require('node:http');
 const { after, before, describe, it } = require('node:test');
 const { DateTime } = require('luxon');
 
-const { app, autoTurnOnFans, checkAutoLights, evaluateAirQuality, isTimeBetween } = require('../server');
+const { app, autoTurnOnFans, checkAutoLights, evaluateAirQuality, getDeviceStatusFromPayload, isTimeBetween } = require('../server');
 const { generateToken, hashPassword } = require('../auth');
 const Fan = require('../models/Fan');
 const Light = require('../models/Light');
@@ -82,6 +82,13 @@ describe('smart home backend endpoints', () => {
         assert.equal(evaluateAirQuality(900), 'WARNING');
         assert.equal(evaluateAirQuality(1100), 'WARNING');
         assert.equal(evaluateAirQuality(1101), 'DANGER');
+    });
+
+    it('parses device status from type or status MQTT payloads', () => {
+        assert.equal(getDeviceStatusFromPayload({ type: 1 }), 1);
+        assert.equal(getDeviceStatusFromPayload({ status: '1' }), 1);
+        assert.equal(getDeviceStatusFromPayload({ status: '0' }), 0);
+        assert.equal(getDeviceStatusFromPayload({ status: 'on' }), undefined);
     });
 
     it('keeps timers active through the configured end minute', () => {
@@ -239,7 +246,7 @@ describe('smart home backend endpoints', () => {
         assert.equal(response.body.lightSensorEnabled, true);
     });
 
-    it('automatically turns fans on when the house is hot or air quality is not good but not dangerous', async () => {
+    it('automatically turns fans on only when the house is hot and PPM is below the warning threshold', async () => {
         const hotFan = {
             name: 'QUAT_1',
             status: 0,
@@ -252,7 +259,7 @@ describe('smart home backend endpoints', () => {
         const gasFan = {
             name: 'QUAT_2',
             status: 0,
-            autoOnByTemperature: false,
+            autoOnByTemperature: true,
             autoOnTemperature: 40,
             save: async function saveFan() {
                 return this;
@@ -260,7 +267,7 @@ describe('smart home backend endpoints', () => {
         };
         Fan.find = async () => [hotFan, gasFan];
 
-        await autoTurnOnFans(31, 'WARNING', 1000);
+        await autoTurnOnFans(41, 'GOOD', 899);
 
         assert.equal(hotFan.status, 1);
         assert.equal(hotFan.isAutoControlled, true);
@@ -268,7 +275,7 @@ describe('smart home backend endpoints', () => {
         assert.equal(gasFan.isAutoControlled, true);
     });
 
-    it('does not turn fans on when gas level is dangerous even if the house is hot', async () => {
+    it('does not turn fans on when PPM reaches the warning threshold even if the house is hot', async () => {
         const fan = {
             name: 'QUAT_1',
             status: 0,
@@ -280,17 +287,17 @@ describe('smart home backend endpoints', () => {
         };
         Fan.find = async () => [fan];
 
-        await autoTurnOnFans(35, 'DANGER', 1300);
+        await autoTurnOnFans(35, 'WARNING', 900);
 
         assert.equal(fan.status, 0);
         assert.equal(fan.isAutoControlled, undefined);
     });
 
-    it('allows auto fan control at the fire boundary because only values above it are dangerous', async () => {
+    it('does not turn fans on from PPM warning alone', async () => {
         const fan = {
             name: 'QUAT_1',
             status: 0,
-            autoOnByTemperature: true,
+            autoOnByTemperature: false,
             autoOnTemperature: 30,
             save: async function saveFan() {
                 return this;
@@ -298,10 +305,10 @@ describe('smart home backend endpoints', () => {
         };
         Fan.find = async () => [fan];
 
-        await autoTurnOnFans(35, 'WARNING', 1100);
+        await autoTurnOnFans(35, 'WARNING', 1000);
 
-        assert.equal(fan.status, 1);
-        assert.equal(fan.isAutoControlled, true);
+        assert.equal(fan.status, 0);
+        assert.equal(fan.isAutoControlled, undefined);
     });
 
     it('does not turn fans on by temperature until a gas level is known', async () => {
@@ -405,7 +412,7 @@ describe('smart home backend endpoints', () => {
         };
         Fan.find = async () => [fan];
 
-        await autoTurnOnFans(35, 'DANGER', 1300);
+        await autoTurnOnFans(35, 'WARNING', 900);
 
         assert.equal(fan.status, 0);
         assert.equal(fan.isAutoControlled, false);

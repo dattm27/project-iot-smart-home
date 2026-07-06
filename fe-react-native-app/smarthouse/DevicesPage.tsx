@@ -109,7 +109,7 @@ const sendDeviceCommand = async (
   token: string | null,
 ) => {
   const endpoint = kind === 'fan' ? '/fans/OnOff' : '/lights/OnOff';
-  await apiFetch(endpoint, {
+  const response = await apiFetch(endpoint, {
     method: 'PUT',
     token,
     body: JSON.stringify({
@@ -117,6 +117,8 @@ const sendDeviceCommand = async (
       type,
     }),
   });
+
+  return response.json();
 };
 
 const sendTimer = async (
@@ -201,6 +203,9 @@ const normalizeFan = (fan: any): DeviceItem => ({
   autoOnTemperature: fan.autoOnTemperature,
 });
 
+const pickDeviceByName = <T extends { name?: string }>(items: T[], preferredName: string) =>
+  items.find((item) => item.name === preferredName) || items[0];
+
 const DevicesPage: React.FC = ({ route }: any) => {
   const requestedRoom = route?.params?.room || 'Phòng demo';
   const { token } = useAuth();
@@ -244,14 +249,14 @@ const DevicesPage: React.FC = ({ route }: any) => {
       if (lightsResult.status === 'fulfilled') {
         const lightData = await lightsResult.value.json();
         if (Array.isArray(lightData.lights) && lightData.lights.length > 0) {
-          loadedDevices.push(normalizeLight(lightData.lights[0]));
+          loadedDevices.push(normalizeLight(pickDeviceByName(lightData.lights, 'DEN_PH')));
         }
       }
 
       if (fansResult.status === 'fulfilled') {
         const fanData = await fansResult.value.json();
         if (Array.isArray(fanData.fans) && fanData.fans.length > 0) {
-          loadedDevices.push(normalizeFan(fanData.fans[0]));
+          loadedDevices.push(normalizeFan(pickDeviceByName(fanData.fans, 'QUAT_1')));
         }
       }
 
@@ -285,7 +290,23 @@ const DevicesPage: React.FC = ({ route }: any) => {
     );
 
     try {
-      await sendDeviceCommand(device.name, device.kind, nextType, token);
+      const commandResponse = await sendDeviceCommand(device.name, device.kind, nextType, token);
+      const responseStatus = device.kind === 'fan' ? commandResponse.fanStatus : commandResponse.lightStatus;
+      const confirmedState = responseStatus === undefined ? nextState : Number(responseStatus) === 1;
+
+      setDevices((prevDevices) =>
+        prevDevices.map((item) =>
+          item.id === device.id
+            ? {
+                ...item,
+                state: confirmedState,
+                ...(commandResponse.light ? normalizeLight(commandResponse.light) : {}),
+                ...(commandResponse.fan ? normalizeFan(commandResponse.fan) : {}),
+              }
+            : item,
+        ),
+      );
+      fetchDevices(true);
     } catch (error) {
       setDevices((prevDevices) =>
         prevDevices.map((item) => (item.id === device.id ? { ...item, state: device.state } : item)),
@@ -584,7 +605,7 @@ const DevicesPage: React.FC = ({ route }: any) => {
               </View>
               <View style={styles.temperatureCopy}>
                 <Text style={styles.temperatureTitle}>Ngưỡng bật quạt</Text>
-                <Text style={styles.temperatureText}>Quạt tự bật khi nhiệt độ đạt ngưỡng và PPM chưa vượt mức nguy hiểm.</Text>
+                <Text style={styles.temperatureText}>Quạt tự bật khi nhiệt độ đạt ngưỡng và PPM đang dưới 900.</Text>
               </View>
             </View>
 
@@ -666,9 +687,7 @@ const DeviceCard = ({
   const statusText = device.state ? 'Đang bật' : 'Đang tắt';
   const timerRange = formatDeviceTimerRange(device);
   const detailText = device.isAutoControlled
-    ? device.lastAutoReason === 'air_quality'
-      ? 'Tự động do không khí'
-      : 'Tự động theo cảm biến'
+    ? 'Tự động theo cảm biến'
     : 'Điều khiển thủ công';
 
   return (
