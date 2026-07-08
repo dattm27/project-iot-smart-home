@@ -6,7 +6,7 @@ Backend Node.js/Express cho hệ thống nhà thông minh: xác thực JWT, qu�
 
 - Node.js 18+.
 - MongoDB Atlas connection string.
-- HiveMQ Cloud broker dùng MQTT over TLS.
+- EMQX Cloud broker dùng MQTT over TLS.
 - Backend có thể dùng CA store mặc định của Node. Nếu cần pin CA riêng, dùng CA certificate của broker MQTT vào `CERT.txt` rồi đặt `MQTT_CA_CERT_PATH=./CERT.txt`.
 
 ## Cài đặt
@@ -35,7 +35,7 @@ JWT_EXPIRES_IN=15m
 REFRESH_TOKEN_TTL_MS=2592000000
 AUTH_RATE_LIMIT_WINDOW_MS=900000
 AUTH_RATE_LIMIT_MAX=8
-MQTT_BROKER_URL=mqtts://f9d443cb65ba4c5db3969a8aa4329685.s1.eu.hivemq.cloud
+MQTT_BROKER_URL=mqtts://u7bf1cb3.ala.asia-southeast1.emqxsl.com
 MQTT_PORT=8883
 MQTT_MQ135_STATISTICS_TOPIC=MQ135/Statistics
 MQTT_DHT22_STATISTICS_TOPIC=DHT22/Statistics
@@ -93,7 +93,7 @@ http://localhost:4000/openapi.json
 
 ## Chạy test
 
-Unit/API tests không cần MongoDB thật, HiveMQ thật hoặc phần cứng:
+Unit/API tests không cần MongoDB thật, EMQX thật hoặc phần cứng:
 
 ```powershell
 npm test

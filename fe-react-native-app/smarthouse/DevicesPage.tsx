@@ -29,6 +29,7 @@ type DeviceItem = {
   autoOnTime?: string | null;
   autoOffTime?: string | null;
   isAutoControlled?: boolean;
+  manualOverride?: boolean;
   lightSensorEnabled?: boolean;
   lastAutoReason?: string | null;
   autoOnByTemperature?: boolean;
@@ -184,6 +185,8 @@ const normalizeLight = (light: any): DeviceItem => ({
   autoOnTime: light.autoOnTime,
   autoOffTime: light.autoOffTime,
   isAutoControlled: light.isAutoControlled,
+  manualOverride: light.manualOverride ?? (Number(light.status) === 0 && light.autoControlLocked),
+  lastAutoReason: light.lastAutoReason,
   lightSensorEnabled: light.lightSensorEnabled,
 });
 
@@ -686,8 +689,12 @@ const DeviceCard = ({
   const icon = isLight ? 'lightbulb-on-outline' : 'fan';
   const statusText = device.state ? 'Đang bật' : 'Đang tắt';
   const timerRange = formatDeviceTimerRange(device);
-  const detailText = device.isAutoControlled
-    ? 'Tự động theo cảm biến'
+  const detailText = device.manualOverride
+    ? 'Tắt tay, đang chặn tự động'
+    : device.isAutoControlled
+      ? device.lastAutoReason === 'light_sensor'
+        ? 'Tự động theo ánh sáng'
+        : 'Tự động theo cảm biến'
     : 'Điều khiển thủ công';
 
   return (

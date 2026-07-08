@@ -6,10 +6,20 @@ const http = require('node:http');
 const { after, before, describe, it } = require('node:test');
 const { DateTime } = require('luxon');
 
-const { app, autoTurnOnFans, checkAutoLights, evaluateAirQuality, getDeviceStatusFromPayload, isTimeBetween } = require('../server');
+const {
+    app,
+    autoTurnOnFans,
+    checkAutoFans,
+    checkAutoLights,
+    evaluateAirQuality,
+    getDeviceStatusFromPayload,
+    handleLightSensorStatusPayload,
+    isTimeBetween,
+} = require('../server');
 const { generateToken, hashPassword } = require('../auth');
 const Fan = require('../models/Fan');
 const Light = require('../models/Light');
+const MQ135Statistics = require('../models/MQ135Statistics');
 const RefreshToken = require('../models/RefreshToken');
 const User = require('../models/User');
 
@@ -193,6 +203,8 @@ describe('smart home backend endpoints', () => {
             name: 'DEN_PH',
             status: 1,
             isAutoControlled: false,
+            manualOverride: false,
+            lastAutoReason: null,
             save: async function saveLight() {
                 return this;
             },
@@ -207,7 +219,9 @@ describe('smart home backend endpoints', () => {
         assert.equal(response.statusCode, 200);
         assert.equal(response.body.lightStatus, 0);
         assert.equal(light.status, 0);
-        assert.equal(light.isAutoControlled, true);
+        assert.equal(light.isAutoControlled, false);
+        assert.equal(light.manualOverride, true);
+        assert.equal(light.lastAutoReason, null);
     });
 
     it('rejects device commands with invalid field types before querying MongoDB', async () => {
@@ -335,6 +349,8 @@ describe('smart home backend endpoints', () => {
             name: 'DEN_PH',
             status: 0,
             isAutoControlled: false,
+            manualOverride: false,
+            lastAutoReason: null,
             timerEnabled: true,
             autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
             autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
@@ -348,6 +364,32 @@ describe('smart home backend endpoints', () => {
 
         assert.equal(light.status, 1);
         assert.equal(light.isAutoControlled, true);
+        assert.equal(light.manualOverride, false);
+        assert.equal(light.lastAutoReason, 'timer');
+    });
+
+    it('does not turn a manually turned-off light back on inside the timer window', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
+        const light = {
+            name: 'DEN_PH',
+            status: 0,
+            isAutoControlled: false,
+            manualOverride: true,
+            lastAutoReason: null,
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            save: async function saveLight() {
+                return this;
+            },
+        };
+        Light.find = async () => [light];
+
+        await checkAutoLights();
+
+        assert.equal(light.status, 0);
+        assert.equal(light.isAutoControlled, false);
+        assert.equal(light.manualOverride, true);
     });
 
     it('turns off a light timer when timerEnabled is false', async () => {
@@ -419,6 +461,100 @@ describe('smart home backend endpoints', () => {
         assert.equal(fan.lastAutoReason, null);
     });
 
+    it('forces a fan off when gas level reaches danger even if timer or manual control is active', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
+        const timerFan = {
+            name: 'QUAT_TIMER',
+            status: 1,
+            isAutoControlled: true,
+            manualOverride: false,
+            lastAutoReason: 'timer',
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        const manualFan = {
+            name: 'QUAT_MANUAL',
+            status: 1,
+            isAutoControlled: false,
+            manualOverride: false,
+            lastAutoReason: null,
+            timerEnabled: false,
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [timerFan, manualFan];
+
+        await autoTurnOnFans(35, 'DANGER', 1101);
+
+        assert.equal(timerFan.status, 0);
+        assert.equal(timerFan.isAutoControlled, false);
+        assert.equal(timerFan.manualOverride, false);
+        assert.equal(timerFan.lastAutoReason, null);
+        assert.equal(manualFan.status, 0);
+    });
+
+    it('does not let sensor auto cooling turn a fan off while its timer window is active', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
+        const fan = {
+            name: 'QUAT_1',
+            status: 1,
+            isAutoControlled: true,
+            manualOverride: false,
+            lastAutoReason: 'temperature',
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+
+        await autoTurnOnFans(25, 'GOOD', 500);
+
+        assert.equal(fan.status, 1);
+        assert.equal(fan.isAutoControlled, true);
+        assert.equal(fan.lastAutoReason, 'temperature');
+    });
+
+    it('does not let fan timer turn a fan on while the latest gas level is dangerous', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
+            isAutoControlled: false,
+            manualOverride: false,
+            lastAutoReason: null,
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+        MQ135Statistics.findOne = () => ({
+            sort: async () => ({ ppm: 1101, airQuality: 'DANGER' }),
+        });
+
+        await checkAutoFans();
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.isAutoControlled, false);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
     it('respects manual fan off until sensor conditions return to normal', async () => {
         const fan = {
             name: 'QUAT_1',
@@ -443,5 +579,28 @@ describe('smart home backend endpoints', () => {
 
         assert.equal(fan.status, 0);
         assert.equal(fan.manualOverride, false);
+    });
+
+    it('ignores light sensor status when light sensor mode is disabled', async () => {
+        const light = {
+            name: 'DEN_PH',
+            status: 0,
+            isAutoControlled: false,
+            manualOverride: false,
+            lastAutoReason: null,
+            lightSensorEnabled: false,
+            save: async function saveLight() {
+                throw new Error('disabled sensor should not save');
+            },
+        };
+        Light.findOne = async () => light;
+
+        const result = await handleLightSensorStatusPayload(JSON.stringify({ status: 1, name: 'DEN_PH' }));
+
+        assert.equal(result.updated, false);
+        assert.equal(result.reason, 'disabled');
+        assert.equal(light.status, 0);
+        assert.equal(light.isAutoControlled, false);
+        assert.equal(light.lastAutoReason, null);
     });
 });
