@@ -222,6 +222,7 @@ const MonitoringPage: React.FC = () => {
             <SummaryCard icon="smoke-detector-outline" label="PPM TB" value={`${formatNumber(averages.ppm)} ppm`} color="#ef4444" />
             <SummaryCard icon="alert-outline" label="Theo dõi từ" value="900 ppm" color="#f59e0b" />
           </View>
+          <Text style={styles.averageNote}>Các chỉ số TB được tính theo {numOfRecords} lần đo gần nhất.</Text>
 
           <View style={styles.controlsRow}>
             {recordOptions.map((option) => (
@@ -463,6 +464,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     marginTop: 14,
+  },
+  averageNote: {
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
   },
   summaryCard: {
     backgroundColor: '#ffffff',

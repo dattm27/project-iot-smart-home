@@ -17,6 +17,9 @@ jobs:
     env:
       JWT_SECRET: test-secret
       JWT_EXPIRES_IN: 7d
+      REFRESH_TOKEN_TTL_MS: 2592000000
+      AUTH_RATE_LIMIT_WINDOW_MS: 900000
+      AUTH_RATE_LIMIT_MAX: 8
       PORT: 4000
       SERVER_IP: 127.0.0.1
       PHONE_IP: http://127.0.0.1:8080
@@ -32,7 +35,10 @@ jobs:
       HIVEMQ_PASSWORD: test
       MQTT_FIRE_ALARM_TOPIC: MQ135/FireAlarm
       MQTT_MQ135_STATISTICS_TOPIC: MQ135/Statistics
+      MQTT_DHT22_STATISTICS_TOPIC: DHT22/Statistics
       MQTT_LIGHTS_CONTROL_TOPIC: lights/01/server
+      MQTT_LIGHT_SENSOR_TOPIC: lights/01/sensor
+      MQTT_LIGHT_SENSOR_CONTROL_TOPIC: lights/01/sensorControl
       MQTT_LIGHTS_RESPONSE_TOPIC: lights/01/button
       MQTT_FANS_CONTROL_TOPIC: fans/01/server
       MQTT_FANS_RESPONSE_TOPIC: fans/01/button

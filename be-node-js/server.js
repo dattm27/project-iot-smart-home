@@ -79,6 +79,8 @@ const defaultFanName = requiredEnv('DEFAULT_FAN_NAME');
 const defaultLightName = requiredEnv('DEFAULT_LIGHT_NAME');
 const timezone = requiredEnv('TIMEZONE');
 const autoCheckIntervalMs = Number(requiredEnv('AUTO_CHECK_INTERVAL_MS'));
+const keepAliveUrl = process.env.KEEP_ALIVE_URL;
+const keepAliveIntervalMs = Number(process.env.KEEP_ALIVE_INTERVAL_MS || 5000);
 const warningPpmThreshold = 900;
 const fireWarningPpmThreshold = 1100;
 
@@ -144,17 +146,20 @@ const getDeviceStatusFromPayload = (payload) => {
 const getLightManualOverride = (light) => Boolean(light.manualOverride ?? (light.status === 0 && light.autoControlLocked));
 const setLightManualState = (light, status) => {
     light.status = status;
-    light.isAutoControlled = false;
     light.manualOverride = status === 0;
     light.lastAutoReason = null;
     light.autoControlLocked = undefined;
 };
 const setLightAutoState = (light, status, reason) => {
     light.status = status;
-    light.isAutoControlled = true;
     light.manualOverride = false;
     light.lastAutoReason = reason;
     light.autoControlLocked = undefined;
+};
+const setFanManualState = (fan, status) => {
+    fan.status = status;
+    fan.manualOverride = status === 0;
+    fan.lastAutoReason = null;
 };
 
 const isFanTimerActive = (fan, currentTime = DateTime.now().setZone(timezone)) => {
@@ -180,7 +185,6 @@ const turnFanOffForGasDanger = async (fan, ppmValue, currentTemperature, airQual
     }
 
     fan.status = 0;
-    fan.isAutoControlled = false;
     fan.manualOverride = false;
     fan.lastAutoReason = null;
     await fan.save();
@@ -665,11 +669,8 @@ mqttClient.on('message', async (topic, message) => {
                     return;
                 }
                 // console.log("HIEU LENH TYPE: ", type);
-                // Cập nhật trạng thái của đèn
+                // Chỉ sync trạng thái thực tế từ ESP32, không ghi đè metadata auto/manual của backend.
                 fan.status = statusValue;
-                fan.isAutoControlled = statusValue === 0;
-                fan.manualOverride = statusValue === 0;
-                fan.lastAutoReason = null;
                 //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
                 log('DB][FAN', 'Synced fan status from device response', {
@@ -879,16 +880,12 @@ app.put('/fans/OnOff', async (req, res) => {
             return res.status(404).json({ error: 'Quạt không tồn tại' });
         }
 
-        // Cập nhật trạng thái của đèn
-        fan.status = type === 1 ? 1 : 0;
-        fan.isAutoControlled = type === 0;
-        fan.manualOverride = type === 0;
-        fan.lastAutoReason = null;
+        // Cập nhật trạng thái của quạt theo thao tác thủ công.
+        setFanManualState(fan, type === 1 ? 1 : 0);
         await fan.save();
         log('DB][FAN', 'Updated fan status from HTTP command', {
             name,
             status: fan.status,
-            isAutoControlled: fan.isAutoControlled,
             manualOverride: fan.manualOverride,
         });
 
@@ -936,6 +933,9 @@ app.put('/fans/AutoCooling', async (req, res) => {
         // Cập nhật trạng thái của đèn
         fan.autoOnByTemperature = autoOnByTemperature == true ? true : false;
         fan.autoOnTemperature = autoOnTemperature;
+        if (fan.autoOnByTemperature) {
+            fan.manualOverride = false;
+        }
         await fan.save();
 
         res.status(200).json({
@@ -1025,7 +1025,6 @@ app.put('/fans/Timer/', async (req, res) => {
         // Cập nhật chế độ hẹn giờ
         fan.timerEnabled = timerEnabled || false;
         if (timerEnabled) {
-            fan.isAutoControlled = false;
             fan.manualOverride = false;
             fan.lastAutoReason = null;
         }
@@ -1121,7 +1120,6 @@ app.put('/lights/OnOff', async (req, res) => {
         log('DB][LIGHT', 'Updated light status from HTTP command', {
             name,
             status: light.status,
-            isAutoControlled: light.isAutoControlled,
             manualOverride: light.manualOverride,
         });
 
@@ -1205,7 +1203,6 @@ app.put('/lights/Timer/', async (req, res) => {
         // Cập nhật chế độ hẹn giờ
         light.timerEnabled = timerEnabled || false;
         if (timerEnabled) {
-            light.isAutoControlled = false;
             light.manualOverride = false;
             light.lastAutoReason = null;
             light.autoControlLocked = undefined;
@@ -1419,15 +1416,13 @@ const checkAutoFans = async () => {
             // Nếu hiện tại nằm trong thời gian bật quạt
             if (isTimeBetween(currentHour, currentMinute, autoOnHour, autoOnMinute, autoOffHour, autoOffMinute)) {
                 // Bật quạt tự động nếu chưa được bật bởi hệ thống
-                if (fan.status === 1 && !fan.isAutoControlled) {
-                    fan.isAutoControlled = true;
+                if (fan.status === 1 && !fan.lastAutoReason && !fan.manualOverride) {
                     fan.manualOverride = false;
                     fan.lastAutoReason = 'timer';
                     await fan.save();
                 }
-                if (!fan.isAutoControlled && fan.status === 0) {
+                if (!fan.lastAutoReason && !fan.manualOverride && fan.status === 0) {
                     fan.status = 1;
-                    fan.isAutoControlled = true; // Đánh dấu là quạt đã được bật tự động
                     fan.manualOverride = false;
                     fan.lastAutoReason = 'timer';
                     await fan.save();
@@ -1441,13 +1436,12 @@ const checkAutoFans = async () => {
             // Nếu hiện tại không nằm trong khoảng thời gian bật
             else {
                 // Tắt quạt tự động nếu chưa được tắt bởi hệ thống
-                if (fan.status === 0 && fan.isAutoControlled) {
-                    fan.isAutoControlled = false;
+                if (fan.status === 0 && fan.manualOverride) {
+                    fan.manualOverride = false;
                     await fan.save();
                 }
-                if (fan.isAutoControlled && fan.status === 1) {
+                if (fan.lastAutoReason === 'timer' && fan.status === 1) {
                     fan.status = 0;
-                    fan.isAutoControlled = false; // Đánh dấu là quạt đã được tắt tự động
                     fan.lastAutoReason = null;
                     await fan.save();
 
@@ -1488,12 +1482,11 @@ const checkAutoLights = async () => {
             // Nếu hiện tại nằm trong thời gian bật đèn
             if (isTimeBetween(currentHour, currentMinute, autoOnHour, autoOnMinute, autoOffHour, autoOffMinute)) {
                 // Bật đèn tự động nếu chưa được bật bởi hệ thống
-                if (light.status === 1 && !light.isAutoControlled && !getLightManualOverride(light)) {
-                    light.isAutoControlled = true;
+                if (light.status === 1 && !light.lastAutoReason && !getLightManualOverride(light)) {
                     light.lastAutoReason = 'timer';
                     await light.save();
                 }
-                if (!light.isAutoControlled && !getLightManualOverride(light) && light.status === 0) {
+                if (!light.lastAutoReason && !getLightManualOverride(light) && light.status === 0) {
                     setLightAutoState(light, 1, 'timer');
                     await light.save();
 
@@ -1511,9 +1504,8 @@ const checkAutoLights = async () => {
                     await light.save();
                 }
                 // Tắt đèn tự động nếu chưa được tắt bởi hệ thống
-                if (light.isAutoControlled && light.lastAutoReason === 'timer' && light.status === 1) {
+                if (light.lastAutoReason === 'timer' && light.status === 1) {
                     light.status = 0;
-                    light.isAutoControlled = false;
                     light.manualOverride = false;
                     light.lastAutoReason = null;
                     light.autoControlLocked = undefined;
@@ -1561,21 +1553,8 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
             const timerActive = isFanTimerActive(fan);
 
             if (!shouldTurnOn) {
-                if (fan.manualOverride) {
-                    fan.manualOverride = false;
-                    await fan.save();
-                    log('AUTO][FAN', 'Cleared manual override because auto fan conditions are not met', {
-                        name: fan.name,
-                        temp: currentTemperature,
-                        threshold: autoOnTemperature,
-                        airQuality,
-                        ppm: ppmValue,
-                    });
-                }
-
-                if (fan.status === 1 && fan.isAutoControlled && fan.lastAutoReason === 'temperature' && !timerActive) {
+                if (fan.status === 1 && fan.lastAutoReason === 'temperature' && !timerActive) {
                     fan.status = 0;
-                    fan.isAutoControlled = false;
                     fan.lastAutoReason = null;
                     await fan.save();
 
@@ -1597,7 +1576,7 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
                     });
                 }
 
-                if (timerActive && fan.status === 1 && fan.isAutoControlled && fan.lastAutoReason === 'temperature') {
+                if (timerActive && fan.status === 1 && fan.lastAutoReason === 'temperature') {
                     log('AUTO][FAN', 'Kept fan on because timer is active', {
                         name: fan.name,
                         temp: currentTemperature,
@@ -1610,23 +1589,10 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
                 continue;
             }
 
-            if (fan.manualOverride) {
-                log('AUTO][FAN', 'Skipped auto-on because user manually turned fan off', {
-                    name: fan.name,
-                    reason,
-                    temp: currentTemperature,
-                    threshold: autoOnTemperature,
-                    airQuality,
-                    ppm: ppmValue,
-                });
-                continue;
-            }
-
             // Chỉ tự bật quạt khi nhà nóng và PPM đang dưới ngưỡng an toàn.
             if (shouldTurnOn && fan.status === 0) {
                 // Cập nhật trạng thái quạt
                 fan.status = 1;
-                fan.isAutoControlled = true;
                 fan.manualOverride = false;
                 fan.lastAutoReason = reason;
                 await fan.save();
@@ -1658,10 +1624,31 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
     }
 };
 
+const startKeepAlive = () => {
+    if (!keepAliveUrl) {
+        return;
+    }
+
+    const ping = async () => {
+        try {
+            const response = await axios.get(keepAliveUrl, {
+                timeout: 5000,
+                validateStatus: () => true,
+            });
+            log('KEEP_ALIVE', 'Pinged render endpoint', { url: keepAliveUrl, status: response.status });
+        } catch (error) {
+            logError('KEEP_ALIVE', `Failed to ping ${keepAliveUrl}`, error);
+        }
+    };
+
+    setInterval(ping, keepAliveIntervalMs);
+};
+
 // Thiết lập một chu kỳ để kiểm tra mỗi phút (60000ms)
 if (process.env.NODE_ENV !== 'test') {
     setInterval(checkAutoLights, autoCheckIntervalMs);
     setInterval(checkAutoFans, autoCheckIntervalMs);
+    startKeepAlive();
 }
 
 if (require.main === module) {

@@ -202,7 +202,6 @@ describe('smart home backend endpoints', () => {
         const light = {
             name: 'DEN_PH',
             status: 1,
-            isAutoControlled: false,
             manualOverride: false,
             lastAutoReason: null,
             save: async function saveLight() {
@@ -219,9 +218,59 @@ describe('smart home backend endpoints', () => {
         assert.equal(response.statusCode, 200);
         assert.equal(response.body.lightStatus, 0);
         assert.equal(light.status, 0);
-        assert.equal(light.isAutoControlled, false);
         assert.equal(light.manualOverride, true);
         assert.equal(light.lastAutoReason, null);
+    });
+
+    it('turns a fan off manually and clears auto reason', async () => {
+        const token = generateToken({ _id: 'user-id', username: 'tester' });
+        const fan = {
+            name: 'QUAT_1',
+            status: 1,
+            manualOverride: false,
+            lastAutoReason: 'temperature',
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.findOne = async () => fan;
+
+        const response = await request('PUT', '/fans/OnOff', {
+            name: 'QUAT_1',
+            type: 0,
+        }, token);
+
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.body.fanStatus, 0);
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, true);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
+    it('clears manual override when auto cooling is enabled', async () => {
+        const token = generateToken({ _id: 'user-id', username: 'tester' });
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
+            autoOnByTemperature: false,
+            autoOnTemperature: 30,
+            manualOverride: true,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.findOne = async () => fan;
+
+        const response = await request('PUT', '/fans/AutoCooling', {
+            name: 'QUAT_1',
+            autoOnByTemperature: true,
+            autoOnTemperature: 24,
+        }, token);
+
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.body.fanAutoOnByTemperature, true);
+        assert.equal(fan.autoOnTemperature, 24);
+        assert.equal(fan.manualOverride, false);
     });
 
     it('rejects device commands with invalid field types before querying MongoDB', async () => {
@@ -284,9 +333,7 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(41, 'GOOD', 899);
 
         assert.equal(hotFan.status, 1);
-        assert.equal(hotFan.isAutoControlled, true);
         assert.equal(gasFan.status, 1);
-        assert.equal(gasFan.isAutoControlled, true);
     });
 
     it('does not turn fans on when PPM reaches the warning threshold even if the house is hot', async () => {
@@ -304,7 +351,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(35, 'WARNING', 900);
 
         assert.equal(fan.status, 0);
-        assert.equal(fan.isAutoControlled, undefined);
     });
 
     it('does not turn fans on from PPM warning alone', async () => {
@@ -322,7 +368,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(35, 'WARNING', 1000);
 
         assert.equal(fan.status, 0);
-        assert.equal(fan.isAutoControlled, undefined);
     });
 
     it('does not turn fans on by temperature until a gas level is known', async () => {
@@ -340,7 +385,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(35, 'UNKNOWN', undefined);
 
         assert.equal(fan.status, 0);
-        assert.equal(fan.isAutoControlled, undefined);
     });
 
     it('automatically turns a light on while inside the configured timer window', async () => {
@@ -348,7 +392,6 @@ describe('smart home backend endpoints', () => {
         const light = {
             name: 'DEN_PH',
             status: 0,
-            isAutoControlled: false,
             manualOverride: false,
             lastAutoReason: null,
             timerEnabled: true,
@@ -363,7 +406,6 @@ describe('smart home backend endpoints', () => {
         await checkAutoLights();
 
         assert.equal(light.status, 1);
-        assert.equal(light.isAutoControlled, true);
         assert.equal(light.manualOverride, false);
         assert.equal(light.lastAutoReason, 'timer');
     });
@@ -373,7 +415,6 @@ describe('smart home backend endpoints', () => {
         const light = {
             name: 'DEN_PH',
             status: 0,
-            isAutoControlled: false,
             manualOverride: true,
             lastAutoReason: null,
             timerEnabled: true,
@@ -388,7 +429,6 @@ describe('smart home backend endpoints', () => {
         await checkAutoLights();
 
         assert.equal(light.status, 0);
-        assert.equal(light.isAutoControlled, false);
         assert.equal(light.manualOverride, true);
     });
 
@@ -421,7 +461,6 @@ describe('smart home backend endpoints', () => {
         const fan = {
             name: 'QUAT_1',
             status: 1,
-            isAutoControlled: true,
             manualOverride: false,
             lastAutoReason: 'temperature',
             autoOnByTemperature: true,
@@ -435,7 +474,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(25, 'GOOD', 500);
 
         assert.equal(fan.status, 0);
-        assert.equal(fan.isAutoControlled, false);
         assert.equal(fan.lastAutoReason, null);
     });
 
@@ -443,7 +481,6 @@ describe('smart home backend endpoints', () => {
         const fan = {
             name: 'QUAT_1',
             status: 1,
-            isAutoControlled: true,
             manualOverride: false,
             lastAutoReason: 'temperature',
             autoOnByTemperature: true,
@@ -457,7 +494,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(35, 'WARNING', 900);
 
         assert.equal(fan.status, 0);
-        assert.equal(fan.isAutoControlled, false);
         assert.equal(fan.lastAutoReason, null);
     });
 
@@ -466,7 +502,6 @@ describe('smart home backend endpoints', () => {
         const timerFan = {
             name: 'QUAT_TIMER',
             status: 1,
-            isAutoControlled: true,
             manualOverride: false,
             lastAutoReason: 'timer',
             timerEnabled: true,
@@ -481,7 +516,6 @@ describe('smart home backend endpoints', () => {
         const manualFan = {
             name: 'QUAT_MANUAL',
             status: 1,
-            isAutoControlled: false,
             manualOverride: false,
             lastAutoReason: null,
             timerEnabled: false,
@@ -496,7 +530,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(35, 'DANGER', 1101);
 
         assert.equal(timerFan.status, 0);
-        assert.equal(timerFan.isAutoControlled, false);
         assert.equal(timerFan.manualOverride, false);
         assert.equal(timerFan.lastAutoReason, null);
         assert.equal(manualFan.status, 0);
@@ -507,7 +540,6 @@ describe('smart home backend endpoints', () => {
         const fan = {
             name: 'QUAT_1',
             status: 1,
-            isAutoControlled: true,
             manualOverride: false,
             lastAutoReason: 'temperature',
             timerEnabled: true,
@@ -524,7 +556,6 @@ describe('smart home backend endpoints', () => {
         await autoTurnOnFans(25, 'GOOD', 500);
 
         assert.equal(fan.status, 1);
-        assert.equal(fan.isAutoControlled, true);
         assert.equal(fan.lastAutoReason, 'temperature');
     });
 
@@ -533,7 +564,6 @@ describe('smart home backend endpoints', () => {
         const fan = {
             name: 'QUAT_1',
             status: 0,
-            isAutoControlled: false,
             manualOverride: false,
             lastAutoReason: null,
             timerEnabled: true,
@@ -551,15 +581,64 @@ describe('smart home backend endpoints', () => {
         await checkAutoFans();
 
         assert.equal(fan.status, 0);
-        assert.equal(fan.isAutoControlled, false);
         assert.equal(fan.lastAutoReason, null);
     });
 
-    it('respects manual fan off until sensor conditions return to normal', async () => {
+    it('does not turn a manually turned-off fan back on inside the timer window', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
         const fan = {
             name: 'QUAT_1',
             status: 0,
-            isAutoControlled: true,
+            manualOverride: true,
+            lastAutoReason: null,
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+        MQ135Statistics.findOne = () => ({
+            sort: async () => ({ ppm: 500, airQuality: 'GOOD' }),
+        });
+
+        await checkAutoFans();
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, true);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
+    it('keeps fan timer manual override when auto cooling conditions are not met', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
+            manualOverride: true,
+            lastAutoReason: null,
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+
+        await autoTurnOnFans(25, 'GOOD', 500);
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, true);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
+    it('lets auto temperature turn a fan on even after a manual off', async () => {
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
             manualOverride: true,
             lastAutoReason: null,
             autoOnByTemperature: true,
@@ -572,21 +651,16 @@ describe('smart home backend endpoints', () => {
 
         await autoTurnOnFans(35, 'GOOD', 500);
 
-        assert.equal(fan.status, 0);
-        assert.equal(fan.manualOverride, true);
-
-        await autoTurnOnFans(25, 'GOOD', 500);
-
-        assert.equal(fan.status, 0);
+        assert.equal(fan.status, 1);
         assert.equal(fan.manualOverride, false);
+        assert.equal(fan.lastAutoReason, 'temperature');
     });
 
     it('ignores light sensor status when light sensor mode is disabled', async () => {
         const light = {
             name: 'DEN_PH',
             status: 0,
-            isAutoControlled: false,
-            manualOverride: false,
+            manualOverride: true,
             lastAutoReason: null,
             lightSensorEnabled: false,
             save: async function saveLight() {
@@ -600,7 +674,29 @@ describe('smart home backend endpoints', () => {
         assert.equal(result.updated, false);
         assert.equal(result.reason, 'disabled');
         assert.equal(light.status, 0);
-        assert.equal(light.isAutoControlled, false);
+        assert.equal(light.manualOverride, true);
         assert.equal(light.lastAutoReason, null);
+    });
+
+    it('lets light sensor control the light even after a manual off', async () => {
+        const light = {
+            name: 'DEN_PH',
+            status: 0,
+            manualOverride: true,
+            lastAutoReason: null,
+            lightSensorEnabled: true,
+            save: async function saveLight() {
+                return this;
+            },
+        };
+        Light.findOne = async () => light;
+
+        const result = await handleLightSensorStatusPayload(JSON.stringify({ status: 1, name: 'DEN_PH' }));
+
+        assert.equal(result.updated, true);
+        assert.equal(result.reason, 'updated');
+        assert.equal(light.status, 1);
+        assert.equal(light.manualOverride, false);
+        assert.equal(light.lastAutoReason, 'light_sensor');
     });
 });

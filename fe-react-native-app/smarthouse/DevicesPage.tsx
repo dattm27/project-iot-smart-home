@@ -695,7 +695,7 @@ const DeviceCard = ({
       ? device.lastAutoReason === 'light_sensor'
         ? 'Tự động theo ánh sáng'
         : 'Tự động theo cảm biến'
-    : 'Điều khiển thủ công';
+    : null;
 
   return (
     <View style={[styles.deviceCard, device.state && { borderColor: accent }]}>
@@ -722,7 +722,7 @@ const DeviceCard = ({
         <View style={[styles.statusDot, { backgroundColor: device.state ? accent : '#94a3b8' }]} />
         <Text style={styles.statusText}>{statusText}</Text>
       </View>
-      <Text style={styles.detailText}>{detailText}</Text>
+      {detailText ? <Text style={styles.detailText}>{detailText}</Text> : null}
 
       {device.kind === 'fan' ? (
         <View style={styles.autoInfoBox}>
@@ -751,7 +751,7 @@ const DeviceCard = ({
               <Text style={styles.sensorModeTitle}>Cảm biến ánh sáng</Text>
             </View>
             <Text style={styles.sensorModeText}>
-              {device.lightSensorEnabled ? 'Đang tự động theo ánh sáng' : 'Đang điều khiển thủ công'}
+              {device.lightSensorEnabled ? 'Đang tự động theo ánh sáng' : 'Chưa bật cảm biến ánh sáng'}
             </Text>
           </View>
           {isSensorPending ? (
