@@ -1,4 +1,4 @@
-# IoT Smart Home Backend
+﻿# IoT Smart Home Backend
 
 Backend Node.js/Express cho hệ thống nhà thông minh: xác thực JWT, quản lý đèn/quạt, nhận dữ liệu MQ135 qua MQTT, tự động bật/tắt quạt theo nhiệt độ/chất lượng không khí, và cung cấp API docs bằng Swagger UI.
 
@@ -6,8 +6,8 @@ Backend Node.js/Express cho hệ thống nhà thông minh: xác thực JWT, qu�
 
 - Node.js 18+.
 - MongoDB Atlas connection string.
-- HiveMQ Cloud broker dùng MQTT over TLS.
-- File `CERT.txt` có sẵn trong thư mục `be-node-js`.
+- EMQX Cloud broker dùng MQTT over TLS.
+- Backend có thể dùng CA store mặc định của Node. Nếu cần pin CA riêng, dùng CA certificate của broker MQTT vào `CERT.txt` rồi đặt `MQTT_CA_CERT_PATH=./CERT.txt`.
 
 ## Cài đặt
 
@@ -28,14 +28,14 @@ Sau đó sửa các biến trong `.env`:
 
 ```env
 MONGO_URI=mongodb+srv://<username>:<password>@<cluster-host>/?retryWrites=true&w=majority&appName=<app-name>
-HIVEMQ_USERNAME=be-server
-HIVEMQ_PASSWORD=<hivemq-password>
+MQTT_USERNAME=be-server
+MQTT_PASSWORD=<mqtt-password>
 JWT_SECRET=<strong-random-secret>
 JWT_EXPIRES_IN=15m
 REFRESH_TOKEN_TTL_MS=2592000000
 AUTH_RATE_LIMIT_WINDOW_MS=900000
 AUTH_RATE_LIMIT_MAX=8
-MQTT_BROKER_URL=mqtts://<cluster-id>.s1.eu.hivemq.cloud
+MQTT_BROKER_URL=mqtts://u7bf1cb3.ala.asia-southeast1.emqxsl.com
 MQTT_PORT=8883
 MQTT_MQ135_STATISTICS_TOPIC=MQ135/Statistics
 MQTT_DHT22_STATISTICS_TOPIC=DHT22/Statistics
@@ -54,20 +54,18 @@ Không commit file `.env`. Repo chỉ commit `.env.example`.
 - Body API được validate strict kiểu dữ liệu, chặn payload object như `{ "$ne": null }` trước khi query MongoDB.
 - Kết nối MQTT dùng `mqtts://` với CA certificate, username/password.
 
-## HiveMQ ACL
+## MQTT ACL
 
-Backend dùng credential `be-server`. Credential này cần permission `PUBLISH_SUBSCRIBE` với topic filter `#` vì backend phải vừa subscribe dữ liệu cảm biến/phản hồi thiết bị, vừa publish lệnh điều khiển.
+Backend dùng credential `be-server`, ESP32 dùng credential `esp32-main`. Không cấp wildcard `#` cho ESP32; mỗi client chỉ được publish/subscribe đúng các topic nó cần.
 
-Các credential gợi ý cho thiết bị:
+Các permission gợi ý:
 
-| Username | Permission | Topic filter | Mục đích |
-| --- | --- | --- | --- |
-| `be-server` | `PUBLISH_SUBSCRIBE` | `#` | Backend |
-| `mq135-sensor` | `PUBLISH_SUBSCRIBE` | `MQ135/#` | Cảm biến MQ135 |
-| `dht22-sensor` | `PUBLISH_SUBSCRIBE` | `DHT22/#` | Cảm biến nhiệt độ/độ ẩm |
-| `light-01` | `PUBLISH_SUBSCRIBE` | `lights/01/#` | Thiết bị đèn |
-| `fan-01` | `PUBLISH_SUBSCRIBE` | `fans/01/#` | Thiết bị quạt |
-| `mqtt-test` | `PUBLISH_SUBSCRIBE` | `#` | Test thủ công, xong nên xóa/disable |
+| Username | Publish | Subscribe |
+| --- | --- | --- |
+| `be-server` | `lights/01/server`, `lights/01/sensorControl`, `fans/01/server` | `MQ135/Statistics`, `MQ135/FireAlarm`, `DHT22/Statistics`, `lights/01/button`, `lights/01/sensor`, `fans/01/button` |
+| `esp32-main` | `MQ135/Statistics`, `MQ135/FireAlarm`, `DHT22/Statistics`, `lights/01/button`, `lights/01/sensor`, `fans/01/button` | `lights/01/server`, `lights/01/sensorControl`, `fans/01/server` |
+
+Credential `mqtt-test` chỉ nên tạo tạm khi test thủ công, xong thì disable hoặc xóa.
 
 ## Chạy backend
 
@@ -95,7 +93,7 @@ http://localhost:4000/openapi.json
 
 ## Chạy test
 
-Unit/API tests không cần MongoDB thật, HiveMQ thật hoặc phần cứng:
+Unit/API tests không cần MongoDB thật, EMQX thật hoặc phần cứng:
 
 ```powershell
 npm test
@@ -123,7 +121,7 @@ Publish PPM bình thường:
 npm run test:auto-cooling -- --ppm 850
 ```
 
-Publish PPM không ổn nhưng chưa nguy hiểm, quạt có thể tự bật:
+Publish PPM không ổn, quạt sẽ không tự bật dù nhiệt độ cao:
 
 ```powershell
 npm run test:auto-cooling -- --ppm 1000
@@ -167,8 +165,8 @@ Authorization: Bearer <token>
 - Quạt:
   - Bật/tắt thủ công qua `PUT /fans/OnOff`.
   - Auto cooling qua `PUT /fans/AutoCooling`.
-  - Quạt tự bật khi nhiệt độ cao hoặc PPM trong khoảng cần theo dõi 900-1100.
-  - Khi PPM lớn hơn 1100, backend không tự bật quạt để tránh làm lan khí gas.
+  - Quạt chỉ tự bật khi nhiệt độ cao hơn ngưỡng cài đặt và PPM nhỏ hơn 900.
+  - Khi PPM từ 900 trở lên, backend không tự bật quạt để tránh làm lan khí gas.
   - Khi PPM lớn hơn 1100, backend bật trạng thái báo cháy.
   - Khi sensor trở lại bình thường, quạt tự tắt nếu trước đó được sensor bật.
   - Nếu người dùng tắt tay khi quạt đang auto bật, backend tôn trọng thao tác tay và không bật lại ngay cho tới khi sensor trở lại bình thường.

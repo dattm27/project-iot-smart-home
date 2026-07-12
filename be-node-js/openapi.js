@@ -79,7 +79,6 @@ const openApiDocument = {
                     timerEnabled: { type: 'boolean', example: false },
                     autoOnTime: { type: 'string', format: 'date-time', nullable: true },
                     autoOffTime: { type: 'string', format: 'date-time', nullable: true },
-                    isAutoControlled: { type: 'boolean', example: false },
                     manualOverride: { type: 'boolean', example: false },
                     lastAutoReason: {
                         type: 'string',
@@ -97,7 +96,12 @@ const openApiDocument = {
                     timerEnabled: { type: 'boolean', example: false },
                     autoOnTime: { type: 'string', format: 'date-time', nullable: true },
                     autoOffTime: { type: 'string', format: 'date-time', nullable: true },
-                    isAutoControlled: { type: 'boolean', example: false },
+                    manualOverride: { type: 'boolean', example: false },
+                    lastAutoReason: {
+                        type: 'string',
+                        nullable: true,
+                        enum: ['timer', 'light_sensor', null],
+                    },
                     lightSensorEnabled: { type: 'boolean', example: false },
                 },
             },

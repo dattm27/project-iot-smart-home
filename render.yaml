@@ -1,4 +1,4 @@
-services:
+﻿services:
   - type: web
     name: project-iot-smart-home-api
     runtime: node
@@ -30,12 +30,12 @@ services:
         value: '8'
       - key: MONGO_URI
         sync: false
-      - key: HIVEMQ_USERNAME
+      - key: MQTT_USERNAME
         sync: false
-      - key: HIVEMQ_PASSWORD
+      - key: MQTT_PASSWORD
         sync: false
       - key: MQTT_BROKER_URL
-        sync: false
+        value: mqtts://u7bf1cb3.ala.asia-southeast1.emqxsl.com
       - key: MQTT_PORT
         value: '8883'
       - key: MQTT_CLIENT_ID
@@ -47,7 +47,7 @@ services:
       - key: MQTT_CONNECT_TIMEOUT_MS
         value: '30000'
       - key: MQTT_CA_CERT_PATH
-        value: ./CERT.txt
+        value: ''
       - key: MQTT_FIRE_ALARM_TOPIC
         value: MQ135/FireAlarm
       - key: MQTT_MQ135_STATISTICS_TOPIC
@@ -75,4 +75,8 @@ services:
       - key: TIMEZONE
         value: Asia/Ho_Chi_Minh
       - key: AUTO_CHECK_INTERVAL_MS
-        value: '30000'
+        value: '5000'
+      - key: KEEP_ALIVE_URL
+        value: https://project-iot-smart-home-api.onrender.com/health
+      - key: KEEP_ALIVE_INTERVAL_MS
+        value: '5000'

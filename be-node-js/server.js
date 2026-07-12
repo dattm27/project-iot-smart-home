@@ -20,6 +20,13 @@ const requiredEnv = (name) => {
     }
     return process.env[name];
 };
+const requiredEnvAny = (...names) => {
+    const foundName = names.find((name) => process.env[name]);
+    if (!foundName) {
+        throw new Error(`${names.join(' or ')} is required`);
+    }
+    return process.env[foundName];
+};
 const log = (scope, message, data = {}) => {
     const details = Object.entries(data)
         .filter(([, value]) => value !== undefined && value !== null)
@@ -38,21 +45,23 @@ const port = Number(requiredEnv('PORT'));
 const ip = requiredEnv('SERVER_IP');
 const brokerUrl = requiredEnv('MQTT_BROKER_URL');
 const phoneIp = requiredEnv('PHONE_IP');
-const caCertPath = requiredEnv('MQTT_CA_CERT_PATH');
-const caCert = process.env.NODE_ENV === 'test' ? undefined : fs.readFileSync(path.resolve(__dirname, caCertPath));
-const hiveMQusername = requiredEnv('HIVEMQ_USERNAME');
-const hiveMQpassword = requiredEnv('HIVEMQ_PASSWORD');
+const caCertPath = process.env.MQTT_CA_CERT_PATH;
+const caCert = process.env.NODE_ENV === 'test' || !caCertPath
+    ? undefined
+    : fs.readFileSync(path.resolve(__dirname, caCertPath));
+const mqttUsername = requiredEnvAny('MQTT_USERNAME', 'HIVEMQ_USERNAME');
+const mqttPassword = requiredEnvAny('MQTT_PASSWORD', 'HIVEMQ_PASSWORD');
 log('CONFIG', 'Loaded MQTT config', { brokerUrl, port: process.env.MQTT_PORT, clientId: process.env.MQTT_CLIENT_ID });
 
 const options = {
     port: Number(requiredEnv('MQTT_PORT')),
-    username: hiveMQusername,
-    password: hiveMQpassword,
+    username: mqttUsername,
+    password: mqttPassword,
     clientId: requiredEnv('MQTT_CLIENT_ID'),
     clean: requiredEnv('MQTT_CLEAN') === 'true',
     reconnectPeriod: Number(requiredEnv('MQTT_RECONNECT_PERIOD_MS')),
     connectTimeout: Number(requiredEnv('MQTT_CONNECT_TIMEOUT_MS')),
-    ca: caCert,
+    ...(caCert ? { ca: caCert } : {}),
 };
 
 // Khai báo các topic
@@ -70,6 +79,8 @@ const defaultFanName = requiredEnv('DEFAULT_FAN_NAME');
 const defaultLightName = requiredEnv('DEFAULT_LIGHT_NAME');
 const timezone = requiredEnv('TIMEZONE');
 const autoCheckIntervalMs = Number(requiredEnv('AUTO_CHECK_INTERVAL_MS'));
+const keepAliveUrl = process.env.KEEP_ALIVE_URL;
+const keepAliveIntervalMs = Number(process.env.KEEP_ALIVE_INTERVAL_MS || 5000);
 const warningPpmThreshold = 900;
 const fireWarningPpmThreshold = 1100;
 
@@ -125,6 +136,120 @@ function isValidJson(str) {
 const toFiniteNumber = (value) => {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : undefined;
+};
+
+const getDeviceStatusFromPayload = (payload) => {
+    const statusValue = toFiniteNumber(payload.type ?? payload.status);
+    return statusValue === 0 || statusValue === 1 ? statusValue : undefined;
+};
+
+const getLightManualOverride = (light) => Boolean(light.manualOverride ?? (light.status === 0 && light.autoControlLocked));
+const setLightManualState = (light, status) => {
+    light.status = status;
+    light.manualOverride = status === 0;
+    light.lastAutoReason = null;
+    light.autoControlLocked = undefined;
+};
+const setLightAutoState = (light, status, reason) => {
+    light.status = status;
+    light.manualOverride = false;
+    light.lastAutoReason = reason;
+    light.autoControlLocked = undefined;
+};
+const setFanManualState = (fan, status) => {
+    fan.status = status;
+    fan.manualOverride = status === 0;
+    fan.lastAutoReason = null;
+};
+
+const isFanTimerActive = (fan, currentTime = DateTime.now().setZone(timezone)) => {
+    if (!fan.timerEnabled || !fan.autoOnTime || !fan.autoOffTime) {
+        return false;
+    }
+
+    const autoOnTime = getTimePartsInZone(fan.autoOnTime);
+    const autoOffTime = getTimePartsInZone(fan.autoOffTime);
+    return isTimeBetween(
+        currentTime.hour,
+        currentTime.minute,
+        autoOnTime.hour,
+        autoOnTime.minute,
+        autoOffTime.hour,
+        autoOffTime.minute
+    );
+};
+
+const turnFanOffForGasDanger = async (fan, ppmValue, currentTemperature, airQuality) => {
+    if (fan.status !== 1) {
+        return false;
+    }
+
+    fan.status = 0;
+    fan.manualOverride = false;
+    fan.lastAutoReason = null;
+    await fan.save();
+
+    const message = JSON.stringify({ type: 0 });
+    mqttClient.publish(FansControlTopic, message, { qos: 0 }, (err) => {
+        if (err) {
+            logError('MQTT][FAN', `Publish failed topic=${FansControlTopic}`, err);
+        } else {
+            log('AUTO][FAN', 'Forced fan off because gas level is dangerous', {
+                name: fan.name,
+                temp: currentTemperature,
+                airQuality,
+                ppm: ppmValue,
+                topic: FansControlTopic,
+                payload: message,
+            });
+        }
+    });
+
+    return true;
+};
+
+const getLatestGasState = async () => {
+    const latestMQ135 = await MQ135Statistics.findOne().sort({ timestamp: -1 });
+    const ppmValue = latestMQ135 ? toFiniteNumber(latestMQ135.ppm) : undefined;
+    return {
+        airQuality: latestMQ135?.airQuality ?? evaluateAirQuality(ppmValue),
+        isDanger: ppmValue !== undefined && ppmValue > fireWarningPpmThreshold,
+        ppm: ppmValue,
+    };
+};
+
+const handleLightSensorStatusPayload = async (payload, topic = LightsSensorTopic) => {
+    if (!isValidJson(payload)) {
+        logError('MQTT][LIGHT_SENSOR', 'Payload is not valid JSON', payload);
+        return { updated: false, reason: 'invalid_json' };
+    }
+
+    const { status, name: payloadName } = JSON.parse(payload);
+    const statusValue = toFiniteNumber(status);
+    const name = payloadName || defaultLightName;
+    log('MQTT][LIGHT_SENSOR', 'Received light status from sensor', { name, status: statusValue, topic });
+
+    if (statusValue !== 0 && statusValue !== 1) {
+        logError('MQTT][LIGHT_SENSOR', 'Invalid payload, missing valid status', payload);
+        return { updated: false, reason: 'invalid_status' };
+    }
+
+    const light = await Light.findOne({ name });
+
+    if (!light) {
+        log('MQTT][LIGHT_SENSOR', 'Ignored status because light was not found', { name });
+        return { updated: false, reason: 'not_found' };
+    }
+
+    if (light.lightSensorEnabled !== true) {
+        log('MQTT][LIGHT_SENSOR', 'Ignored status because light sensor mode is disabled', { name, status: statusValue });
+        return { updated: false, reason: 'disabled', light };
+    }
+
+    setLightAutoState(light, statusValue, 'light_sensor');
+    await light.save();
+    log('DB][LIGHT_SENSOR', 'Synced light status from light sensor', { name, status: light.status, source: topic });
+    return { updated: true, reason: 'updated', light };
 };
 
 const authRateLimitStore = new Map();
@@ -526,9 +651,17 @@ mqttClient.on('message', async (topic, message) => {
         // Trả về phản hồi thành công
         try {
             if (isValidJson(payload)) {
-                const { type, name: payloadName } = JSON.parse(payload);
+                const parsedPayload = JSON.parse(payload);
+                const { name: payloadName } = parsedPayload;
+                const statusValue = getDeviceStatusFromPayload(parsedPayload);
                 const name = payloadName || defaultFanName;
-                log('MQTT][FAN', 'Received device response', { name, action: actionText(type), topic });
+                log('MQTT][FAN', 'Received device response', { name, action: actionText(statusValue), status: statusValue, topic });
+
+                if (statusValue === undefined) {
+                    logError('MQTT][FAN', 'Invalid payload, missing valid type/status', payload);
+                    return;
+                }
+
                 let fan = await Fan.findOne({ name });
 
                 if (!fan) {
@@ -536,11 +669,8 @@ mqttClient.on('message', async (topic, message) => {
                     return;
                 }
                 // console.log("HIEU LENH TYPE: ", type);
-                // Cập nhật trạng thái của đèn
-                fan.status = type == 1 ? 1 : 0;
-                fan.isAutoControlled = type == 0;
-                fan.manualOverride = type == 0;
-                fan.lastAutoReason = null;
+                // Chỉ sync trạng thái thực tế từ ESP32, không ghi đè metadata auto/manual của backend.
+                fan.status = statusValue;
                 //console.log("I FOUND THIS FAN: ", fan);
                 await fan.save();
                 log('DB][FAN', 'Synced fan status from device response', {
@@ -562,9 +692,17 @@ mqttClient.on('message', async (topic, message) => {
     if (topic === LightsResponseTopic) {
         try {
             if (isValidJson(payload)) {
-                const { type, name: payloadName } = JSON.parse(payload);
+                const parsedPayload = JSON.parse(payload);
+                const { name: payloadName } = parsedPayload;
+                const statusValue = getDeviceStatusFromPayload(parsedPayload);
                 const name = payloadName || defaultLightName;
-                log('MQTT][LIGHT', 'Received device response', { name, action: actionText(type), topic });
+                log('MQTT][LIGHT', 'Received device response', { name, action: actionText(statusValue), status: statusValue, topic });
+
+                if (statusValue === undefined) {
+                    logError('MQTT][LIGHT', 'Invalid payload, missing valid type/status', payload);
+                    return;
+                }
+
                 let light = await Light.findOne({ name });
 
                 if (!light) {
@@ -572,9 +710,8 @@ mqttClient.on('message', async (topic, message) => {
                     return;
                 }
 
-                // Cập nhật trạng thái của đèn
-                light.status = type == 1 ? 1 : 0;
-                light.isAutoControlled = type == 0;
+                // Chỉ sync trạng thái thực tế từ ESP32, không ghi đè metadata auto/manual của backend.
+                light.status = statusValue;
                 await light.save();
                 log('DB][LIGHT', 'Synced light status from device response', { name, status: light.status, source: topic });
             }
@@ -588,31 +725,7 @@ mqttClient.on('message', async (topic, message) => {
     }
     if (topic === LightsSensorTopic) {
         try {
-            if (isValidJson(payload)) {
-                const { status, name: payloadName } = JSON.parse(payload);
-                const statusValue = toFiniteNumber(status);
-                const name = payloadName || defaultLightName;
-                log('MQTT][LIGHT_SENSOR', 'Received light status from sensor', { name, status: statusValue, topic });
-
-                if (statusValue !== 0 && statusValue !== 1) {
-                    logError('MQTT][LIGHT_SENSOR', 'Invalid payload, missing valid status', payload);
-                    return;
-                }
-
-                const light = await Light.findOne({ name });
-
-                if (!light) {
-                    log('MQTT][LIGHT_SENSOR', 'Ignored status because light was not found', { name });
-                    return;
-                }
-
-                light.status = statusValue;
-                light.isAutoControlled = true;
-                await light.save();
-                log('DB][LIGHT_SENSOR', 'Synced light status from light sensor', { name, status: light.status, source: topic });
-            } else {
-                logError('MQTT][LIGHT_SENSOR', 'Payload is not valid JSON', payload);
-            }
+            await handleLightSensorStatusPayload(payload, topic);
         } catch (err) {
             logError('MQTT][LIGHT_SENSOR', 'Failed to handle light sensor status', err);
         }
@@ -767,16 +880,12 @@ app.put('/fans/OnOff', async (req, res) => {
             return res.status(404).json({ error: 'Quạt không tồn tại' });
         }
 
-        // Cập nhật trạng thái của đèn
-        fan.status = type === 1 ? 1 : 0;
-        fan.isAutoControlled = type === 0;
-        fan.manualOverride = type === 0;
-        fan.lastAutoReason = null;
+        // Cập nhật trạng thái của quạt theo thao tác thủ công.
+        setFanManualState(fan, type === 1 ? 1 : 0);
         await fan.save();
         log('DB][FAN', 'Updated fan status from HTTP command', {
             name,
             status: fan.status,
-            isAutoControlled: fan.isAutoControlled,
             manualOverride: fan.manualOverride,
         });
 
@@ -824,6 +933,9 @@ app.put('/fans/AutoCooling', async (req, res) => {
         // Cập nhật trạng thái của đèn
         fan.autoOnByTemperature = autoOnByTemperature == true ? true : false;
         fan.autoOnTemperature = autoOnTemperature;
+        if (fan.autoOnByTemperature) {
+            fan.manualOverride = false;
+        }
         await fan.save();
 
         res.status(200).json({
@@ -913,7 +1025,6 @@ app.put('/fans/Timer/', async (req, res) => {
         // Cập nhật chế độ hẹn giờ
         fan.timerEnabled = timerEnabled || false;
         if (timerEnabled) {
-            fan.isAutoControlled = false;
             fan.manualOverride = false;
             fan.lastAutoReason = null;
         }
@@ -1004,10 +1115,13 @@ app.put('/lights/OnOff', async (req, res) => {
         }
 
         // Cập nhật trạng thái của đèn
-        light.status = type === 1 ? 1 : 0;
-        light.isAutoControlled = type === 0;
+        setLightManualState(light, type === 1 ? 1 : 0);
         await light.save();
-        log('DB][LIGHT', 'Updated light status from HTTP command', { name, status: light.status, isAutoControlled: light.isAutoControlled });
+        log('DB][LIGHT', 'Updated light status from HTTP command', {
+            name,
+            status: light.status,
+            manualOverride: light.manualOverride,
+        });
 
         const message = JSON.stringify({ type });
 
@@ -1021,7 +1135,8 @@ app.put('/lights/OnOff', async (req, res) => {
             // Trả về phản hồi thành công
             res.status(200).json({
                 message: type === 1 ? 'Đèn đã bật' : 'Đèn đã tắt',
-                lightStatus: light.status
+                lightStatus: light.status,
+                light,
             });
         });
 
@@ -1088,7 +1203,9 @@ app.put('/lights/Timer/', async (req, res) => {
         // Cập nhật chế độ hẹn giờ
         light.timerEnabled = timerEnabled || false;
         if (timerEnabled) {
-            light.isAutoControlled = false;
+            light.manualOverride = false;
+            light.lastAutoReason = null;
+            light.autoControlLocked = undefined;
         }
 
         // Nếu bật chế độ hẹn giờ, cập nhật thời gian bật và tắt
@@ -1272,9 +1389,15 @@ app.get('/dht22statistics', async (req, res) => {
 const checkAutoFans = async () => {
     try {
         // Lấy tất cả quạt đang bật chế độ hẹn giờ
+        const latestGasState = await getLatestGasState();
         const fans = await Fan.find({ timerEnabled: true });
 
-        fans.forEach(async (fan) => {
+        for (const fan of fans) {
+            if (latestGasState.isDanger) {
+                await turnFanOffForGasDanger(fan, latestGasState.ppm, undefined, latestGasState.airQuality);
+                continue;
+            }
+
             const currentTime = DateTime.now().setZone(timezone);
             //console.log("THOI GIAN HIEN TAI: ", currentTime);
             const currentHour = currentTime.hour;
@@ -1293,15 +1416,13 @@ const checkAutoFans = async () => {
             // Nếu hiện tại nằm trong thời gian bật quạt
             if (isTimeBetween(currentHour, currentMinute, autoOnHour, autoOnMinute, autoOffHour, autoOffMinute)) {
                 // Bật quạt tự động nếu chưa được bật bởi hệ thống
-                if (fan.status === 1 && !fan.isAutoControlled) {
-                    fan.isAutoControlled = true;
+                if (fan.status === 1 && !fan.lastAutoReason && !fan.manualOverride) {
                     fan.manualOverride = false;
                     fan.lastAutoReason = 'timer';
                     await fan.save();
                 }
-                if (!fan.isAutoControlled && fan.status === 0) {
+                if (!fan.lastAutoReason && !fan.manualOverride && fan.status === 0) {
                     fan.status = 1;
-                    fan.isAutoControlled = true; // Đánh dấu là quạt đã được bật tự động
                     fan.manualOverride = false;
                     fan.lastAutoReason = 'timer';
                     await fan.save();
@@ -1315,13 +1436,12 @@ const checkAutoFans = async () => {
             // Nếu hiện tại không nằm trong khoảng thời gian bật
             else {
                 // Tắt quạt tự động nếu chưa được tắt bởi hệ thống
-                if (fan.status === 0 && fan.isAutoControlled) {
-                    fan.isAutoControlled = false;
+                if (fan.status === 0 && fan.manualOverride) {
+                    fan.manualOverride = false;
                     await fan.save();
                 }
-                if (fan.isAutoControlled && fan.status === 1) {
+                if (fan.lastAutoReason === 'timer' && fan.status === 1) {
                     fan.status = 0;
-                    fan.isAutoControlled = false; // Đánh dấu là quạt đã được tắt tự động
                     fan.lastAutoReason = null;
                     await fan.save();
 
@@ -1331,7 +1451,7 @@ const checkAutoFans = async () => {
                     log('AUTO][FAN', 'Turned fan off by timer', { name: fan.name, topic: FansControlTopic, payload: message });
                 }
             }
-        });
+        }
     } catch (err) {
         logError('AUTO][FAN', 'Failed while checking fan timer', err);
     }
@@ -1362,13 +1482,12 @@ const checkAutoLights = async () => {
             // Nếu hiện tại nằm trong thời gian bật đèn
             if (isTimeBetween(currentHour, currentMinute, autoOnHour, autoOnMinute, autoOffHour, autoOffMinute)) {
                 // Bật đèn tự động nếu chưa được bật bởi hệ thống
-                if (light.status === 1 && !light.isAutoControlled) {
-                    light.isAutoControlled = true;
+                if (light.status === 1 && !light.lastAutoReason && !getLightManualOverride(light)) {
+                    light.lastAutoReason = 'timer';
                     await light.save();
                 }
-                if (!light.isAutoControlled && light.status === 0) {
-                    light.status = 1;
-                    light.isAutoControlled = true; // Đánh dấu là đèn đã được bật tự động
+                if (!light.lastAutoReason && !getLightManualOverride(light) && light.status === 0) {
+                    setLightAutoState(light, 1, 'timer');
                     await light.save();
 
                     // Gửi thông điệp MQTT để bật đèn
@@ -1379,14 +1498,17 @@ const checkAutoLights = async () => {
             }
             // Nếu hiện tại không nằm trong khoảng thời gian bật
             else {
-                if (light.status === 0 && light.isAutoControlled) {
-                    light.isAutoControlled = false;
+                if (light.status === 0 && getLightManualOverride(light)) {
+                    light.manualOverride = false;
+                    light.autoControlLocked = undefined;
                     await light.save();
                 }
                 // Tắt đèn tự động nếu chưa được tắt bởi hệ thống
-                if (light.isAutoControlled && light.status === 1) {
+                if (light.lastAutoReason === 'timer' && light.status === 1) {
                     light.status = 0;
-                    light.isAutoControlled = false; // Đánh dấu là đèn đã được tắt tự động
+                    light.manualOverride = false;
+                    light.lastAutoReason = null;
+                    light.autoControlLocked = undefined;
                     await light.save();
 
                     // Gửi thông điệp MQTT để tắt đèn
@@ -1411,37 +1533,28 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
         }
         const ppmValue = toFiniteNumber(ppm);
         const isGasLevelKnown = ppmValue !== undefined;
-        const isDangerousGas = isGasLevelKnown && ppmValue > fireWarningPpmThreshold;
-        const shouldTurnOnByAirQuality = ppmValue !== undefined
-            && ppmValue >= warningPpmThreshold
-            && ppmValue <= fireWarningPpmThreshold;
+        const isGasDanger = isGasLevelKnown && ppmValue > fireWarningPpmThreshold;
+        const isAirQualitySafeForCooling = isGasLevelKnown && ppmValue < warningPpmThreshold;
 
         // Duyệt qua tất cả các quạt
         for (const fan of fans) {
+            if (isGasDanger) {
+                await turnFanOffForGasDanger(fan, ppmValue, currentTemperature, airQuality);
+                continue;
+            }
+
             const autoOnTemperature = fan.autoOnTemperature;
             const shouldTurnOnByTemperature = fan.autoOnByTemperature === true
                 && isGasLevelKnown
                 && Number(currentTemperature) >= Number(autoOnTemperature)
-                && !isDangerousGas;
-            const shouldTurnOn = shouldTurnOnByTemperature || shouldTurnOnByAirQuality;
-            const reason = shouldTurnOnByTemperature ? 'temperature' : (shouldTurnOnByAirQuality ? 'air_quality' : 'none');
+                && isAirQualitySafeForCooling;
+            const shouldTurnOn = shouldTurnOnByTemperature;
+            const reason = shouldTurnOnByTemperature ? 'temperature' : 'none';
+            const timerActive = isFanTimerActive(fan);
 
             if (!shouldTurnOn) {
-                if (fan.manualOverride) {
-                    fan.manualOverride = false;
-                    await fan.save();
-                    log('AUTO][FAN', 'Cleared manual override because auto fan conditions are not met', {
-                        name: fan.name,
-                        temp: currentTemperature,
-                        threshold: autoOnTemperature,
-                        airQuality,
-                        ppm: ppmValue,
-                    });
-                }
-
-                if (fan.status === 1 && fan.isAutoControlled && ['temperature', 'air_quality'].includes(fan.lastAutoReason)) {
+                if (fan.status === 1 && fan.lastAutoReason === 'temperature' && !timerActive) {
                     fan.status = 0;
-                    fan.isAutoControlled = false;
                     fan.lastAutoReason = null;
                     await fan.save();
 
@@ -1463,26 +1576,23 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
                     });
                 }
 
+                if (timerActive && fan.status === 1 && fan.lastAutoReason === 'temperature') {
+                    log('AUTO][FAN', 'Kept fan on because timer is active', {
+                        name: fan.name,
+                        temp: currentTemperature,
+                        threshold: autoOnTemperature,
+                        airQuality,
+                        ppm: ppmValue,
+                    });
+                }
+
                 continue;
             }
 
-            if (fan.manualOverride) {
-                log('AUTO][FAN', 'Skipped auto-on because user manually turned fan off', {
-                    name: fan.name,
-                    reason,
-                    temp: currentTemperature,
-                    threshold: autoOnTemperature,
-                    airQuality,
-                    ppm: ppmValue,
-                });
-                continue;
-            }
-
-            // Không bật quạt khi PPM đã vượt ngưỡng nguy hiểm để tránh lan khí gas.
+            // Chỉ tự bật quạt khi nhà nóng và PPM đang dưới ngưỡng an toàn.
             if (shouldTurnOn && fan.status === 0) {
                 // Cập nhật trạng thái quạt
                 fan.status = 1;
-                fan.isAutoControlled = true;
                 fan.manualOverride = false;
                 fan.lastAutoReason = reason;
                 await fan.save();
@@ -1514,10 +1624,31 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
     }
 };
 
+const startKeepAlive = () => {
+    if (!keepAliveUrl) {
+        return;
+    }
+
+    const ping = async () => {
+        try {
+            const response = await axios.get(keepAliveUrl, {
+                timeout: 5000,
+                validateStatus: () => true,
+            });
+            log('KEEP_ALIVE', 'Pinged render endpoint', { url: keepAliveUrl, status: response.status });
+        } catch (error) {
+            logError('KEEP_ALIVE', `Failed to ping ${keepAliveUrl}`, error);
+        }
+    };
+
+    setInterval(ping, keepAliveIntervalMs);
+};
+
 // Thiết lập một chu kỳ để kiểm tra mỗi phút (60000ms)
 if (process.env.NODE_ENV !== 'test') {
     setInterval(checkAutoLights, autoCheckIntervalMs);
     setInterval(checkAutoFans, autoCheckIntervalMs);
+    startKeepAlive();
 }
 
 if (require.main === module) {
@@ -1532,5 +1663,8 @@ module.exports = {
     checkAutoFans,
     checkAutoLights,
     evaluateAirQuality,
+    getDeviceStatusFromPayload,
+    handleLightSensorStatusPayload,
+    isFanTimerActive,
     isTimeBetween,
 };

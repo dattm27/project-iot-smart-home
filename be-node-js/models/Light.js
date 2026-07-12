@@ -28,14 +28,37 @@ const lightSchema = new mongoose.Schema({
     autoOffTime: {
         type: Date,  // Thời gian tự động tắt đèn
     },
-    // Trạng thái kiểm soát tự động
-    isAutoControlled: {
+    manualOverride: {
         type: Boolean,
         default: false,
+    },
+    lastAutoReason: {
+        type: String,
+        enum: ['timer', 'light_sensor', null],
+        default: null,
+    },
+    // Field legacy, chỉ giữ để đọc dữ liệu đã lưu trước khi đổi sang manualOverride.
+    autoControlLocked: {
+        type: Boolean,
+        default: undefined,
     },
     lightSensorEnabled: {
         type: Boolean,
         default: false,
+    },
+});
+
+lightSchema.set('toJSON', {
+    transform: (_doc, ret) => {
+        delete ret.autoControlLocked;
+        return ret;
+    },
+});
+
+lightSchema.set('toObject', {
+    transform: (_doc, ret) => {
+        delete ret.autoControlLocked;
+        return ret;
     },
 });
 

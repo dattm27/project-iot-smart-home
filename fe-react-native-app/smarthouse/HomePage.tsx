@@ -234,9 +234,7 @@ const HomePage: React.FC = () => {
           </View>
 
           <View style={styles.metricsCard}>
-            <MetricRow label="PPM tổng" value={formatNumber(latestPpm, ' ppm')} color={ppmColor(latestPpm)} />
-            <MetricRow label="Theo dõi từ" value="900 ppm" color="#f59e0b" />
-            <MetricRow label="Báo cháy trên" value="1100 ppm" color="#ef4444" />
+            <MetricRow label="PPM hiện tại" value={formatNumber(latestPpm, ' ppm')} color={ppmColor(latestPpm)} />
           </View>
         </>
       )}
