@@ -262,12 +262,29 @@ const turnFansOffForFireAlarm = async (status, time) => {
     return turnedOffCount;
 };
 
+const getLatestFireAlarmState = async () => {
+    const latestFireAlarm = await FireAlarm.findOne().sort({ timestamp: -1 });
+    const status = latestFireAlarm?.status;
+
+    return {
+        isActive: status !== undefined && isFireAlarmActiveStatus(status),
+        status,
+        time: latestFireAlarm?.time,
+    };
+};
+
 const getLatestGasState = async () => {
     const latestMQ135 = await MQ135Statistics.findOne().sort({ timestamp: -1 });
+    const latestFireAlarm = await getLatestFireAlarmState();
     const ppmValue = latestMQ135 ? toFiniteNumber(latestMQ135.ppm) : undefined;
+    const isPpmDanger = ppmValue !== undefined && ppmValue > fireWarningPpmThreshold;
+
     return {
         airQuality: latestMQ135?.airQuality ?? evaluateAirQuality(ppmValue),
-        isDanger: ppmValue !== undefined && ppmValue > fireWarningPpmThreshold,
+        isDanger: isPpmDanger || latestFireAlarm.isActive,
+        isFireAlarmActive: latestFireAlarm.isActive,
+        fireAlarmStatus: latestFireAlarm.status,
+        fireAlarmTime: latestFireAlarm.time,
         ppm: ppmValue,
     };
 };
@@ -1474,7 +1491,11 @@ const checkAutoFans = async () => {
 
         for (const fan of fans) {
             if (latestGasState.isDanger) {
-                await turnFanOffForGasDanger(fan, latestGasState.ppm, undefined, latestGasState.airQuality);
+                if (latestGasState.isFireAlarmActive) {
+                    await turnFanOffForFireAlarm(fan, latestGasState.fireAlarmStatus, latestGasState.fireAlarmTime);
+                } else {
+                    await turnFanOffForGasDanger(fan, latestGasState.ppm, undefined, latestGasState.airQuality);
+                }
                 continue;
             }
 
@@ -1611,6 +1632,7 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
             log('AUTO][FAN', 'Skipped auto cooling because no fans exist');
             return;
         }
+        const latestFireAlarm = await getLatestFireAlarmState();
         const ppmValue = toFiniteNumber(ppm);
         const isGasLevelKnown = ppmValue !== undefined;
         const isGasDanger = isGasLevelKnown && ppmValue > fireWarningPpmThreshold;
@@ -1618,6 +1640,11 @@ const autoTurnOnFans = async (currentTemperature, airQuality, ppm) => {
 
         // Duyệt qua tất cả các quạt
         for (const fan of fans) {
+            if (latestFireAlarm.isActive) {
+                await turnFanOffForFireAlarm(fan, latestFireAlarm.status, latestFireAlarm.time);
+                continue;
+            }
+
             if (isGasDanger) {
                 await turnFanOffForGasDanger(fan, ppmValue, currentTemperature, airQuality);
                 continue;

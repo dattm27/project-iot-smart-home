@@ -3,7 +3,7 @@ process.env.JWT_SECRET = 'test-secret';
 
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { after, before, describe, it } = require('node:test');
+const { after, before, beforeEach, describe, it } = require('node:test');
 const { DateTime } = require('luxon');
 
 const {
@@ -27,6 +27,12 @@ const User = require('../models/User');
 
 let server;
 let baseUrl;
+
+const mockLatestFireAlarm = (fireAlarm) => {
+    FireAlarm.findOne = () => ({
+        sort: async () => fireAlarm,
+    });
+};
 
 const request = async (method, pathname, body, token, options = {}) => {
     const payload = body ? JSON.stringify(body) : undefined;
@@ -63,6 +69,10 @@ describe('smart home backend endpoints', () => {
         server = app.listen(0);
         const address = server.address();
         baseUrl = `http://127.0.0.1:${address.port}`;
+    });
+
+    beforeEach(() => {
+        mockLatestFireAlarm(null);
     });
 
     after(() => {
@@ -586,6 +596,33 @@ describe('smart home backend endpoints', () => {
         assert.equal(fan.lastAutoReason, null);
     });
 
+    it('does not let fan timer turn a fan back on while fire alarm is active', async () => {
+        const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
+            manualOverride: false,
+            lastAutoReason: null,
+            timerEnabled: true,
+            autoOnTime: now.minus({ minutes: 1 }).toJSDate(),
+            autoOffTime: now.plus({ minutes: 1 }).toJSDate(),
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+        MQ135Statistics.findOne = () => ({
+            sort: async () => ({ ppm: 500, airQuality: 'GOOD' }),
+        });
+        mockLatestFireAlarm({ status: 'active', time: '2026-07-13 16-21-42' });
+
+        await checkAutoFans();
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, false);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
     it('does not turn a manually turned-off fan back on inside the timer window', async () => {
         const now = DateTime.now().setZone(process.env.TIMEZONE || 'Asia/Ho_Chi_Minh');
         const fan = {
@@ -609,6 +646,28 @@ describe('smart home backend endpoints', () => {
 
         assert.equal(fan.status, 0);
         assert.equal(fan.manualOverride, true);
+        assert.equal(fan.lastAutoReason, null);
+    });
+
+    it('does not let auto temperature turn a fan on while fire alarm is active', async () => {
+        const fan = {
+            name: 'QUAT_1',
+            status: 0,
+            manualOverride: false,
+            lastAutoReason: null,
+            autoOnByTemperature: true,
+            autoOnTemperature: 30,
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        Fan.find = async () => [fan];
+        mockLatestFireAlarm({ status: 'active', time: '2026-07-13 16-21-42' });
+
+        await autoTurnOnFans(35, 'GOOD', 500);
+
+        assert.equal(fan.status, 0);
+        assert.equal(fan.manualOverride, false);
         assert.equal(fan.lastAutoReason, null);
     });
 
