@@ -13,11 +13,13 @@ const {
     checkAutoLights,
     evaluateAirQuality,
     getDeviceStatusFromPayload,
+    handleFireAlarmStatusPayload,
     handleLightSensorStatusPayload,
     isTimeBetween,
 } = require('../server');
 const { generateToken, hashPassword } = require('../auth');
 const Fan = require('../models/Fan');
+const FireAlarm = require('../models/FireAlarm');
 const Light = require('../models/Light');
 const MQ135Statistics = require('../models/MQ135Statistics');
 const RefreshToken = require('../models/RefreshToken');
@@ -698,5 +700,71 @@ describe('smart home backend endpoints', () => {
         assert.equal(light.status, 1);
         assert.equal(light.manualOverride, false);
         assert.equal(light.lastAutoReason, 'light_sensor');
+    });
+
+    it('forces running fans off when fire alarm topic reports active', async () => {
+        const runningFan = {
+            name: 'QUAT_1',
+            status: 1,
+            manualOverride: true,
+            lastAutoReason: 'timer',
+            save: async function saveFan() {
+                return this;
+            },
+        };
+        const stoppedFan = {
+            name: 'QUAT_2',
+            status: 0,
+            manualOverride: false,
+            lastAutoReason: null,
+            save: async function saveFan() {
+                throw new Error('stopped fan should not save');
+            },
+        };
+        FireAlarm.findOne = () => ({ sort: async () => null });
+        FireAlarm.prototype.save = async function saveFireAlarm() {
+            return this;
+        };
+        Fan.find = async () => [runningFan, stoppedFan];
+
+        const result = await handleFireAlarmStatusPayload(JSON.stringify({
+            time: '2026-07-13 16-21-42',
+            status: 'active',
+        }));
+
+        assert.equal(result.updated, true);
+        assert.equal(result.turnedOffFans, 1);
+        assert.equal(runningFan.status, 0);
+        assert.equal(runningFan.manualOverride, false);
+        assert.equal(runningFan.lastAutoReason, null);
+        assert.equal(stoppedFan.status, 0);
+    });
+
+    it('does not force fans off when fire alarm topic reports inactive', async () => {
+        const runningFan = {
+            name: 'QUAT_1',
+            status: 1,
+            manualOverride: false,
+            lastAutoReason: null,
+            save: async function saveFan() {
+                throw new Error('inactive fire alarm should not save fan');
+            },
+        };
+        FireAlarm.findOne = () => ({ sort: async () => null });
+        FireAlarm.prototype.save = async function saveFireAlarm() {
+            return this;
+        };
+        Fan.find = async () => [runningFan];
+
+        const result = await handleFireAlarmStatusPayload(JSON.stringify({
+            time: '2026-07-13 16-22-10',
+            status: 'inactive',
+        }));
+
+        assert.equal(result.updated, true);
+        assert.equal(result.turnedOffFans, 0);
+        assert.equal(runningFan.status, 1);
+        assert.equal(runningFan.manualOverride, false);
+        assert.equal(runningFan.lastAutoReason, null);
     });
 });

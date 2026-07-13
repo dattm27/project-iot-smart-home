@@ -208,6 +208,60 @@ const turnFanOffForGasDanger = async (fan, ppmValue, currentTemperature, airQual
     return true;
 };
 
+const isFireAlarmActiveStatus = (status) => status !== 'inactive';
+
+const turnFanOffForFireAlarm = async (fan, status, time) => {
+    if (fan.status !== 1) {
+        return false;
+    }
+
+    fan.status = 0;
+    fan.manualOverride = false;
+    fan.lastAutoReason = null;
+    await fan.save();
+
+    const message = JSON.stringify({ type: 0 });
+    mqttClient.publish(FansControlTopic, message, { qos: 0 }, (err) => {
+        if (err) {
+            logError('MQTT][FAN', `Publish failed topic=${FansControlTopic}`, err);
+        } else {
+            log('AUTO][FAN', 'Forced fan off because fire alarm is active', {
+                name: fan.name,
+                status,
+                time,
+                topic: FansControlTopic,
+                payload: message,
+            });
+        }
+    });
+
+    return true;
+};
+
+const turnFansOffForFireAlarm = async (status, time) => {
+    if (!isFireAlarmActiveStatus(status)) {
+        return 0;
+    }
+
+    const fans = await Fan.find();
+    let turnedOffCount = 0;
+
+    for (const fan of fans) {
+        const didTurnOff = await turnFanOffForFireAlarm(fan, status, time);
+        if (didTurnOff) {
+            turnedOffCount += 1;
+        }
+    }
+
+    log('AUTO][FAN', 'Processed fan safety for fire alarm', {
+        status,
+        time,
+        turnedOffCount,
+    });
+
+    return turnedOffCount;
+};
+
 const getLatestGasState = async () => {
     const latestMQ135 = await MQ135Statistics.findOne().sort({ timestamp: -1 });
     const ppmValue = latestMQ135 ? toFiniteNumber(latestMQ135.ppm) : undefined;
@@ -475,6 +529,31 @@ const saveFireAlarmStatus = async (time, status) => {
     log('DB][FIRE', 'Saved fire alarm event', { status, time, isFire });
 };
 
+const handleFireAlarmStatusPayload = async (payload, topic = fireAlarmTopic) => {
+    if (!isValidJson(payload)) {
+        logError('MQTT][FIRE', 'Payload is not valid JSON', payload);
+        return { updated: false, reason: 'invalid_json' };
+    }
+
+    const { time, status } = JSON.parse(payload);
+    log('MQTT][FIRE', 'Received fire alarm event', { status, time, topic });
+
+    if (!time || !status) {
+        logError('MQTT][FIRE', 'Invalid payload, missing time or status', payload);
+        return { updated: false, reason: 'invalid_payload' };
+    }
+
+    await saveFireAlarmStatus(time, status);
+    const turnedOffFans = await turnFansOffForFireAlarm(status, time);
+
+    return {
+        updated: true,
+        reason: 'updated',
+        status,
+        turnedOffFans,
+    };
+};
+
 function evaluateAirQuality(ppm) {
     const ppmValue = toFiniteNumber(ppm);
     if (ppmValue === undefined) return "UNKNOWN";
@@ -558,6 +637,7 @@ mqttClient.on('message', async (topic, message) => {
                 // Kiểm tra nếu tham số time và status hợp lệ
                 if (time && status) {
                     await saveFireAlarmStatus(time, status);
+                    await turnFansOffForFireAlarm(status, time);
                     return;
                 } else {
                     logError('MQTT][FIRE', 'Invalid payload, missing time or status', payload);
@@ -1664,6 +1744,7 @@ module.exports = {
     checkAutoLights,
     evaluateAirQuality,
     getDeviceStatusFromPayload,
+    handleFireAlarmStatusPayload,
     handleLightSensorStatusPayload,
     isFanTimerActive,
     isTimeBetween,
