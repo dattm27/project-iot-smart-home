@@ -505,7 +505,8 @@ mqttClient.on('connect', () => {
             log('MQTT', 'Subscribed', { topic: fireAlarmTopic });
         }
     });
-    // Lắng nghe sự kiện FireAlarm từ topic MQ135/Statistics
+    // Lắng nghe dữ liệu MQ135 để lưu thống kê khí và xử lý logic quạt.
+    // Trạng thái báo cháy chỉ được nhận từ topic MQ135/FireAlarm.
     mqttClient.subscribe(MQ135StatisticsTopic, (err) => {
         if (err) {
             logError('MQTT', `Subscribe failed topic=${MQ135StatisticsTopic}`, err);
@@ -597,7 +598,6 @@ mqttClient.on('message', async (topic, message) => {
 
                     // bat tat quat khi nhiet do qua nong
                     //console.log("BAT DAU CHUC NANG BAT QUAT THEO NHIET DO")
-                    await saveFireAlarmStatus(time, ppmValue > fireWarningPpmThreshold ? 'active' : 'inactive');
                     const latestDHT22 = await DHT22Statistics.findOne().sort({ timestamp: -1 });
                     if (latestDHT22) {
                         await autoTurnOnFans(latestDHT22.temp, AirQuality, ppmValue);
