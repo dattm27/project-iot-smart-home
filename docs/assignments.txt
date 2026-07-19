@@ -1,0 +1,13 @@
+Các yêu cầu:
+1) Thiết kế, xây dựng kiến trúc tổng quan của 1 hệ thống ứng dụng IoT
+Sơ đồ kiến trúc hệ thống
+Mô tả các thành phần trong hệ thống, công nghệ sử dụng cho các thành phần của hệ thống
+Phương thức giao tiếp trao đổi dữ liệu
+2) Triển khai, xây dựng hệ thống ứng dụng IoT:
+Lập trình phần mềm, ây dựng các thành phần của hệ thống, các chức năng nghiệp vụ (Backend server, Web App, Mobile App)
+Khuyến khích thiết kế chế tạo phần cứng, thiết bị IoT
+Có thể khai thác nền tảng IoT platform
+3) Triển khai áp dụng được các kỹ thuật bảo mật cho hệ thống
+Một số kỹ thuật bảo mật có thể triển khai:
+Xác thực người dùng, xác thực API
+Phân tích/áp dụng các cơ chế bảo mật trong hệ thống
