@@ -2,3 +2,6 @@
 be-node-js/.env
 *.log
 fe-react-native-app/smarthouse/.expo/
+
+.DS_Store
+~$*
